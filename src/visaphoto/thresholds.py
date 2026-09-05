@@ -40,17 +40,36 @@ from typing import Final
 # while an obvious smile or open mouth is caught. Deliberately insensitive: a false "please
 # retake" wastes a user's time, and the downstream validator is not relying on these.
 
-SMILE_SCORE: Final[float] = 0.35
-"""Max of mouthSmileLeft/Right above which we advise that the expression may not be neutral.
-Neutral reference measured 0.004. Most specs require a neutral expression with mouth closed."""
+SMILE_SCORE: Final[float] = 0.13
+"""Max of mouthSmileLeft/Right above which we advise the expression may not be neutral.
+
+Calibrated, not guessed. Across 18 posed photographs the two classes separate cleanly:
+
+    not smiling (9 photos)   0.000 - 0.088   highest was a bared-teeth grimace
+    smiling     (8 photos)   0.179 - 0.912   lowest was a subtle closed-lip smile
+
+0.13 sits in the empty gap between them. The previous value of 0.35 missed three genuine
+smiles, including one at 0.337 that was plainly visible."""
 
 JAW_OPEN_SCORE: Final[float] = 0.30
 """jawOpen above which we advise the mouth may be open. Neutral reference measured 0.037."""
 
-EYE_CLOSED_SCORE: Final[float] = 0.55
-"""Max of eyeBlinkLeft/Right above which we advise an eye may be closed. Neutral reference
-measured 0.15 and 0.07. Set high because a partly-lidded eye is common and acceptable, while
-every spec surveyed requires eyes open and visible."""
+EYE_CLOSED_SCORE: Final[float] = 0.42
+"""Max of eyeBlinkLeft/Right above which we advise an eye may be closed.
+
+Calibrated across the same 18 photographs:
+
+    eyes open   (15 photos)  0.020 - 0.344   highest was a head-tilted-back shot
+    eyes shut   (2 photos)   0.526 - 0.793
+
+0.42 sits between. The previous 0.55 missed a photo with both eyes squeezed shut (0.526).
+
+KNOWN LIMITATION - a one-eyed wink is NOT caught by this signal. On the one wink in the set,
+eyeBlink scored 0.182/0.211 while eyeSquint scored 0.451/0.736: MediaPipe classifies a hard
+wink as a squint, not a blink. eyeSquint cannot be used directly, because it reads 0.43-0.47
+on a fully neutral face. Left-right squint asymmetry does separate it (0.285 for the wink
+against 0.043 for neutral), but one example is not enough to set a threshold on. See
+ROADMAP.md."""
 
 # --- Geometry sanity --------------------------------------------------------------------
 

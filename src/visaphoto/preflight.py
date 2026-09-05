@@ -146,12 +146,12 @@ def run(
 
     findings: list[Finding] = []
     for requirement in requirements:
-        findings.append(_assess(requirement, flags, ied))
+        findings.append(_assess(requirement, flags, result))
     return Preflight(mode=mode, jurisdiction=code, findings=findings)
 
 
 def _assess(
-    requirement: Requirement, flags: dict[str, Flag], ied: float | None
+    requirement: Requirement, flags: dict[str, Flag], result: MeasurementSet
 ) -> Finding:
     if requirement.check is Check.USER_ATTESTATION:
         return Finding(requirement, Outcome.ATTESTATION_REQUIRED,
@@ -163,7 +163,11 @@ def _assess(
         return Finding(requirement, Outcome.NOT_EVALUATED,
                        requirement.note or "no signal available in this build")
 
+    if "pose" in requirement.signals:
+        return _assess_pose(requirement, result)
+
     if "ied" in requirement.signals:
+        ied = result.value("inter_eye_distance")
         if ied is None:
             return Finding(requirement, Outcome.NOT_EVALUATED,
                            "inter-eye distance could not be measured")
@@ -185,3 +189,37 @@ def _assess(
                        score=fired[0].score, threshold=fired[0].threshold)
     return Finding(requirement, Outcome.LIKELY_OK,
                    "; ".join(f.detail for f in relevant))
+
+
+def _assess_pose(requirement: Requirement, result: MeasurementSet) -> Finding:
+    """Check measured head angles against limits the source itself publishes.
+
+    Both halves matter and are reported separately: the LIMIT is the destination's law, the
+    MEASUREMENT is our uncalibrated estimate. A photo near a limit is not settled by this.
+    """
+    limits = requirement.numeric_limits or {}
+    measured = {
+        axis: result.value(f"pose_{axis}") for axis in ("pitch", "yaw", "roll")
+    }
+    if all(v is None for v in measured.values()):
+        return Finding(requirement, Outcome.NOT_EVALUATED, "head pose could not be measured")
+
+    exceeded, described = [], []
+    for axis, value in measured.items():
+        limit = limits.get(axis)
+        if value is None or limit is None:
+            continue
+        described.append(f"{axis} {value:+.1f} deg (limit +/-{limit:.0f})")
+        if abs(value) > limit:
+            exceeded.append((axis, value, limit))
+
+    detail = "; ".join(described) or "no comparable axes"
+    if exceeded:
+        axis, value, limit = exceeded[0]
+        return Finding(
+            requirement, Outcome.WARN,
+            detail + f" - {axis} exceeds the published limit; our angle estimate is itself "
+            "uncalibrated, so confirm by eye",
+            score=abs(value), threshold=limit,
+        )
+    return Finding(requirement, Outcome.LIKELY_OK, detail)

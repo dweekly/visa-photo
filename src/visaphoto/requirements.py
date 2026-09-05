@@ -57,6 +57,10 @@ class Requirement:
     source: str
     check: Check
     note: str = ""
+    numeric_limits: dict[str, float] | None = None
+    """Limits the SOURCE publishes, in the source's own units. Distinct from thresholds.py,
+    which holds our heuristics: these are somebody's law."""
+
     signals: tuple[str, ...] = ()
     """Which advisory signals assess this requirement, named explicitly.
 
@@ -102,6 +106,26 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         source=EU_GUIDANCE,
         check=Check.ADVISORY_SIGNAL,
         signals=("eyes_closed",),
+    ),
+    Requirement(
+        key="pose_frontal_cn",
+        jurisdictions=("CN",),
+        quote=(
+            "The head position: <= 20 degrees for left or right tilt (Yaw and Roll) and "
+            "<= 25 degrees for up or down tilt (Pitch)."
+        ),
+        source=CN_SHEET,
+        check=Check.ADVISORY_SIGNAL,
+        note=(
+            "The limits are China's, not ours. Our ANGLE ESTIMATE is nonetheless advisory: "
+            "MediaPipe documents its transformation matrix as a canonical-face-to-detected-"
+            "face transform for applying effects, not as a calibrated pose measurement, and "
+            "two backends disagreed by up to 2.6 degrees on one image. Note also that the "
+            "source lumps yaw and roll under one phrase, 'left or right tilt', so we apply "
+            "the 20-degree limit to both rather than guessing which was meant."
+        ),
+        numeric_limits={"yaw": 20.0, "roll": 20.0, "pitch": 25.0},
+        signals=("pose",),
     ),
     Requirement(
         key="glasses_cn",

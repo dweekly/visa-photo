@@ -78,6 +78,28 @@ unless publication is explicitly authorised. Options are an authorised real port
 synthetic face from the ONOT dataset, which costs nothing in consent and is reproducible by
 anyone cloning the repo.
 
+## Expression detection gaps, with evidence
+
+Calibrated 2026-09-04 against 18 posed photographs of one subject. Smiles, open mouths and
+closed eyes are now caught reliably. Three failure types are not, and each has been tested
+rather than assumed:
+
+- **One-eyed wink.** MediaPipe scores it as `eyeSquint` (0.451/0.736), not `eyeBlink`
+  (0.182/0.211). `eyeSquint` cannot be used directly - it reads 0.43-0.47 on a fully neutral
+  face. Left-right squint *asymmetry* does separate it (0.285 wink vs 0.043 neutral), but one
+  example is not enough to set a threshold on. Needs more winks, ideally from several people.
+- **Grimace / bared teeth.** Scores 0.088 smile, below any usable threshold. `browDown` and
+  `mouthPress` are no help: both read *higher* on the neutral photos than on the grimace.
+- **Deliberate wide stare.** `eyeWide` reads 0.029/0.046 against 0.004 neutral - too small a
+  separation to threshold.
+
+All three are asserted as known misses in `tests/test_calibration.py`, so fixing one breaks a
+test and forces this section to be updated.
+
+**The set is one adult male subject.** Thresholds that separate cleanly here may not
+generalise across age, skin tone, facial hair or capture device. Broadening it is the single
+highest-value thing that could be done for detection quality.
+
 ## Known work not yet scheduled
 
 - **Pose acceptance gate.** Pose is advisory until measured against known angles near the actual
