@@ -22,6 +22,38 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
 - **Stage 5 — seeded profiles and docs.** `cn_visa_digital`, `cn_visa_paper`, `us_visa_digital`,
   `us_passport_print`, `schengen_icao_base`, `nz_nzeta`.
 
+## Adoption: distribution and the Claude skill
+
+Scheduled after Stage 5, but it constrains CLI design now, so it is recorded here.
+
+**Distribution is `uvx`.** Publish to PyPI so the entry point is
+`uvx visa-photo photo.jpg --spec cn_visa_digital` with no venv and no install step. `uv` pins the
+interpreter, which this project genuinely needs: mediapipe must be 0.10.x, and pip will install it
+onto an unsupported Python where it aborts (see [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md)).
+`uvx --python 3.12` makes that invisible rather than a support burden. Model weights cache once
+under `~/.cache/visa-photo`, pinned by checksum.
+
+**CLI decisions this forces:**
+
+- **Refuse to guess the submission channel.** `--country CN` alone must be an error listing
+  `cn_visa_digital` and `cn_visa_paper` and stating that they have different aspect ratios and
+  different rules. This is the founding mistake encoded as a hard failure rather than a doc note.
+- `--json` report with a stable, versioned schema, so a caller parses rather than scrapes.
+- `visa-photo specs` lists available profiles and their channels.
+- Exit codes distinguish *fails a requirement* from *could not evaluate* from *crashed*.
+- HEIC input support (`pillow-heif`). Phone photos are the common case.
+
+**The Claude skill is mostly prohibitions.** Its purpose is to stop an agent doing by hand what
+this tool exists to prevent. `SKILL.md` must instruct:
+
+- Never hand-crop with ImageMagick or equivalent. Run the CLI, or report that you cannot.
+- **Never invent a spec for an unlisted country.** Refuse, list what exists, point at the
+  contribution workflow. An agent reading a consulate page and synthesising a spec entry is the
+  worst available failure mode for this project.
+- **Never collapse `indeterminate` or `not_evaluated` into "compliant".** Quote per-criterion
+  outcomes verbatim. A summarising model drifts toward a clean pass, and distinguishing "passes"
+  from "we could not check" is the entire value of the tool.
+
 ## Known work not yet scheduled
 
 - **Pose acceptance gate.** Pose is advisory until measured against known angles near the actual
