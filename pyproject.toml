@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visa-photo"
+version = "0.1.0.dev0"
+description = "Make a portrait satisfy a specific country's visa photo rules - and say honestly when it can't."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "David E. Weekly" }]
+requires-python = ">=3.10,<3.13"
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Multimedia :: Graphics",
+]
+
+dependencies = [
+  # mediapipe MUST stay on the 0.10 line: 1.0.x aborts inside a Metal helper during graph
+  # setup on macOS. See NEGATIVE_RESULTS.md. requires-python is capped at <3.13 for the
+  # same reason - 0.10.x publishes no wheels beyond 3.12.
+  "mediapipe>=0.10.14,<0.11",
+  "rembg>=2.0",
+  "onnxruntime>=1.17",
+  "numpy>=1.24",
+  "pillow>=10",
+  "pillow-heif>=0.16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+visa-photo = "visaphoto.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dweekly/visa-photo"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

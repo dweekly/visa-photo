@@ -54,6 +54,30 @@ this tool exists to prevent. `SKILL.md` must instruct:
   outcomes verbatim. A summarising model drifts toward a clean pass, and distinguishing "passes"
   from "we could not check" is the entire value of the tool.
 
+## Hosted service - visa.weekly.org
+
+A web service taking a source photo plus a destination and returning either a conformant photo or
+a rejection reason. Recorded 2026-09-04.
+
+**The unresolved question is not hosting, it is the privacy promise.** This project's stated
+property today is that no photo leaves your machine, and the README says so. A hosted service
+inverts that: users would upload a face and, for a visa photo specifically, an ID-grade portrait.
+Before building it we need a data-handling position we are willing to publish - process and
+discard in memory, no retention, no image logging, no third-party analytics on the page - and the
+local tool's promise must not be quietly weakened to match the service's.
+
+Secondary: the stack cannot run on Cloudflare Workers (mediapipe and rembg are native Python).
+Cloudflare Containers or GCP Cloud Run are the realistic options. Decide only after the privacy
+position is settled.
+
+## Demonstration assets
+
+A before/after pair on a real photo, for the README and for showing what the tool does. Blocked
+on a decision recorded in docs/PLAN.md: personal photographs stay out of the public repository
+unless publication is explicitly authorised. Options are an authorised real portrait, or a
+synthetic face from the ONOT dataset, which costs nothing in consent and is reproducible by
+anyone cloning the repo.
+
 ## Known work not yet scheduled
 
 - **Pose acceptance gate.** Pose is advisory until measured against known angles near the actual

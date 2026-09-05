@@ -33,17 +33,24 @@ Same version on Linux (Ubuntu, kernel 6.8, x86_64, headless) fails differently, 
 OSError: libGLESv2.so.2: cannot open shared object file
 ```
 
-**Inference, not established fact:** both failures are consistent with mediapipe 1.0.x's C
-bindings requiring a working graphics stack even for CPU-only inference. We did not confirm this
-in mediapipe's source. What *is* established is that 0.10.21 works on the same macOS machine and
-initialises GL successfully (`GL version: 2.1 (2.1 Metal - 90.5), renderer: Apple M4 Max`).
+**The Linux failure was a missing system library, not a bug.** After
+`sudo apt install libgles2`, mediapipe **1.0.1 runs correctly on Linux** and produces values
+identical to macOS 0.10.21 on the same image - chin y=2282, eye line y=1320, IED=492, pose
+-0.6/1.7/1.7, to the digit. So the abort is specific to 1.0.x on macOS, and the version pin is a
+platform workaround rather than a correctness concern: two versions on two architectures agree
+exactly.
+
+**Still inference, not established fact:** the macOS abort is *consistent with* 1.0.x requiring a
+graphics stack during graph setup in a way 0.10.x does not, but we did not confirm that in
+mediapipe's source. What is established is the reproduction above, and that 0.10.21 initialises GL
+successfully on the same machine (`GL version: 2.1 (2.1 Metal - 90.5), renderer: Apple M4 Max`).
 
 A search of the mediapipe issue tracker on 2026-09-04 found no report matching the
 `DrishtiMetalHelper` signature. Adjacent open macOS/Metal issues exist (#5267 and others) but none
 is this trace.
 
-**Linux note:** headless Linux needs `libgles2` installed (`sudo apt install libgles2`) for any
-mediapipe version. This is a system-dependency gap, not a bug.
+**Linux requirement:** any mediapipe version needs `libgles2` present
+(`sudo apt install libgles2`). Required for any CI image.
 
 ---
 
