@@ -68,12 +68,48 @@ def _render(measurements, preflight) -> None:
         print("been checked, and several requirements above could not be evaluated at all.")
 
 
+def _fetch_models() -> int:
+    """Download model weights. Kept separate from measurement on purpose: photo processing
+    must never open a network connection, so that the offline promise is testable."""
+    from .backends import segmentation
+    from .measure import MODEL_URL, default_model_path
+
+    landmark = default_model_path()
+    if landmark.is_file():
+        print(f"landmark model already present: {landmark}")
+    else:
+        print(f"downloading landmark model -> {landmark}")
+        landmark.parent.mkdir(parents=True, exist_ok=True)
+        import urllib.request
+
+        urllib.request.urlretrieve(MODEL_URL, landmark)
+        print("  done")
+
+    weights = segmentation.model_path()
+    if weights.is_file():
+        print(f"segmentation model already present: {weights}")
+    else:
+        print(f"downloading segmentation model ({segmentation.MODEL_NAME}) -> {weights}")
+        import rembg
+
+        rembg.new_session(segmentation.MODEL_NAME)
+        print("  done" if weights.is_file() else "  WARNING: weights still not at that path")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="visa-photo",
         description="Measure a portrait and check it against sourced photo requirements.",
     )
-    parser.add_argument("photo", type=Path, help="source photograph")
+    parser.add_argument(
+        "photo", type=Path, nargs="?",
+        help="source photograph (omit with --fetch-models)",
+    )
+    parser.add_argument(
+        "--fetch-models", action="store_true",
+        help="download the model weights, then exit. The only command that uses the network.",
+    )
     parser.add_argument(
         "--for", dest="jurisdiction", default=None, metavar="CODE",
         help="where the photo is going (e.g. CN, US, EU, NZ). Omit for generic advisories.",
@@ -85,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="skip the person matte (faster; no crown or silhouette width)")
     args = parser.parse_args(argv)
 
+    if args.fetch_models:
+        return _fetch_models()
+
+    if args.photo is None:
+        parser.error("a photo is required unless --fetch-models is given")
     if not args.photo.is_file():
         print(f"error: no such file: {args.photo}", file=sys.stderr)
         return EXIT_USAGE

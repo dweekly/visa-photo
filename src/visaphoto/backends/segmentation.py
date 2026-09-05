@@ -19,6 +19,26 @@ from ..thresholds import HEAD_WIDTH_BAND_BELOW_EYES, MATTE_BORDER_TOUCH_FRACTION
 
 MODEL_NAME = "birefnet-general"
 
+
+def model_path() -> "pathlib.Path":
+    """Where rembg caches the segmentation weights.
+
+    Mirrors rembg's own resolution order (REMBG_HOME, else XDG_DATA_HOME/rembg, else
+    ~/.rembg), with U2NET_HOME still winning when set, as rembg does.
+    """
+    import os
+    import pathlib
+
+    if os.getenv("U2NET_HOME"):
+        home = pathlib.Path(os.path.expanduser(os.getenv("U2NET_HOME")))
+    elif os.getenv("REMBG_HOME"):
+        home = pathlib.Path(os.path.expanduser(os.getenv("REMBG_HOME")))
+    elif os.getenv("XDG_DATA_HOME"):
+        home = pathlib.Path(os.getenv("XDG_DATA_HOME")) / "rembg"
+    else:
+        home = pathlib.Path.home() / ".rembg"
+    return home / "models" / MODEL_NAME / f"{MODEL_NAME}.onnx"
+
 # Alpha above which a pixel counts as subject. Our own choice: high enough that the soft edge
 # around hair does not inflate the silhouette, low enough not to erode it.
 ALPHA_SOLID = 200
@@ -40,6 +60,19 @@ def measure(image_rgb, result: MeasurementSet) -> None:
 
     result.backends["rembg"] = getattr(rembg, "__version__", "unknown")
     result.backends["segmentation_model"] = MODEL_NAME
+
+    # Never download during photo processing. rembg fetches weights lazily inside
+    # new_session(), which would turn "measure this photo" into an unannounced network
+    # request and a long wait - and contradict this project's promise that processing works
+    # offline once installed. Fetching is a separate, explicit step.
+    weights = model_path()
+    if not weights.is_file():
+        _unavailable(
+            result,
+            f"segmentation weights are not present at {weights}. Fetch them once with "
+            "'visa-photo fetch-models'; photo processing never downloads anything.",
+        )
+        return
 
     try:
         session = rembg.new_session(MODEL_NAME)
@@ -105,6 +138,36 @@ HEAD_WIDTH_DEFINITION = (
 )
 
 
+def _face_component(solid, result: MeasurementSet):
+    """Keep only the connected foreground region containing the face.
+
+    Segmentation noise is not anatomy. A single detached foreground pixel near the frame
+    edge spans the row-width calculation and inflates a measured head width - reproduced at
+    200px -> 291px by one stray pixel. Restricting to the component under the eyes removes
+    that whole class.
+
+    Falls back to the unmodified matte if the face position is unknown or the component
+    cannot be identified; the caller's other guards still apply.
+    """
+    eye_x, eye_y = result.value("eye_mid_x"), result.value("eye_line_y")
+    if eye_x is None or eye_y is None:
+        return solid
+    try:
+        from scipy import ndimage
+    except Exception:  # noqa: BLE001
+        return solid
+    labels, count = ndimage.label(solid)
+    if count <= 1:
+        return solid
+    row, col = int(round(eye_y)), int(round(eye_x))
+    if not (0 <= row < labels.shape[0] and 0 <= col < labels.shape[1]):
+        return solid
+    face_label = labels[row, col]
+    if face_label == 0:
+        return solid
+    return labels == face_label
+
+
 def head_width_between(
     solid, top: int, eye_line_y: float | None, chin_y: float | None
 ):
@@ -136,13 +199,21 @@ def head_width_between(
             f"the chin (y={chin_y:.0f}) is not below the crown (y={top}); the matte and the "
             "landmarks disagree about where the head is"
         )
+    band = solid[top:head_bottom]
     widths = [
-        int(np.where(r)[0].max() - np.where(r)[0].min() + 1)
-        for r in solid[top:head_bottom]
-        if r.any()
+        int(np.where(r)[0].max() - np.where(r)[0].min() + 1) for r in band if r.any()
     ]
     if not widths:
         return None, "the matte has no solid rows between the crown and the chin"
+
+    # A head running off the side of the frame has no measurable width. Reporting the
+    # clipped extent as a measurement is the same error as reporting the image edge as the
+    # crown: confident, and wrong by an unknown amount.
+    if band[:, 0].any() or band[:, -1].any():
+        return None, (
+            "the head touches the left or right edge of the image, so its full width is "
+            "outside the frame and cannot be measured"
+        )
     return max(widths), None
 
 

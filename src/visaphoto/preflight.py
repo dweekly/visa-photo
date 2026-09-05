@@ -138,15 +138,24 @@ def run(
     ied = result.value("inter_eye_distance")
 
     if jurisdiction is None:
-        mode, requirements, code = "generic", GENERIC_ADVISORIES, None
+        mode, requirements, code = "generic", list(GENERIC_ADVISORIES), None
     else:
         code = jurisdiction.upper()
-        requirements = for_jurisdiction(code)
+        requirements = list(for_jurisdiction(code))
         mode = "jurisdiction" if requirements else "unseeded"
+        # A destination we have transcribed may say nothing about expression - we have no
+        # verbatim expression rule for the US or NZ, for instance. Without this, a photo with
+        # both eyes shut detected the problem and then reported nothing, because no
+        # requirement claimed that signal. Generic advisories fill only the uncovered signals,
+        # and stay labelled GENERIC so they are never mistaken for that country's law.
+        if requirements:
+            covered = {s for r in requirements for s in r.signals}
+            requirements += [
+                advisory for advisory in GENERIC_ADVISORIES
+                if advisory.signals and not set(advisory.signals) <= covered
+            ]
 
-    findings: list[Finding] = []
-    for requirement in requirements:
-        findings.append(_assess(requirement, flags, result))
+    findings = [_assess(requirement, flags, result) for requirement in requirements]
     return Preflight(mode=mode, jurisdiction=code, findings=findings)
 
 

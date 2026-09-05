@@ -24,6 +24,8 @@ dependencies = [
   "rembg>=2.0",
   "onnxruntime>=1.17",
   "numpy>=1.24",
+  # Connected-component labelling, to isolate the face from segmentation noise.
+  "scipy>=1.11",
   "pillow>=10",
   "pillow-heif>=0.16",
 ]

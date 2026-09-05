@@ -84,3 +84,74 @@ class TestHeadWidthIsBoundedByTheHead:
         width, reason = head_width_between(np.zeros((100, 100), dtype=bool), 0, 25.0, 50.0)
         assert width is None
         assert "no solid rows" in reason
+
+
+class TestMatteNoiseAndClipping:
+    """Second review pass. Both defects reported a confident number where the honest answer
+    was 'unavailable' or 'that pixel is not part of the head'."""
+
+    @staticmethod
+    def head_matte() -> np.ndarray:
+        solid = np.zeros((300, 400), dtype=bool)
+        solid[20:220, 100:300] = True  # 200 px wide head
+        return solid
+
+    def _result(self, eye_x=200.0, eye_y=120.0, chin=219.0):
+        from visaphoto.measurements import Confidence, Measurement, MeasurementSet, Status
+
+        r = MeasurementSet(source="synthetic", image_width=400, image_height=300)
+        for name, value in (("eye_mid_x", eye_x), ("eye_line_y", eye_y),
+                            ("chin_y_landmark", chin)):
+            r.add(Measurement(
+                name=name, definition="d", status=Status.AVAILABLE, value=value,
+                unit="px", backend="synthetic", confidence=Confidence.MEASURED,
+            ))
+        return r
+
+    def test_one_stray_pixel_does_not_inflate_head_width(self):
+        """A single detached foreground pixel near the frame edge took 200 px to 291 px."""
+        from visaphoto.backends.segmentation import _face_component
+
+        solid = self.head_matte()
+        clean, _ = head_width_between(solid, 20, 120.0, 219.0)
+        assert clean == 200
+
+        noisy = self.head_matte()
+        noisy[60, 390] = True
+        isolated = _face_component(noisy, self._result())
+        measured, _ = head_width_between(isolated, 20, 120.0, 219.0)
+        assert measured == 200, "segmentation noise must not be measured as anatomy"
+
+    def test_head_clipped_at_the_side_is_unavailable(self):
+        """Cropping through the hair leaves both eyes visible, so landmarks cannot catch it."""
+        clipped = self.head_matte()[:, 150:]
+        width, reason = head_width_between(clipped, 20, 120.0, 219.0)
+        assert width is None
+        assert "left or right edge" in reason
+
+    def test_uncropped_head_still_measures(self):
+        width, reason = head_width_between(self.head_matte(), 20, 120.0, 219.0)
+        assert width == 200 and reason is None
+
+
+class TestNoDetectedProblemIsHidden:
+    """US and NZ have no transcribed expression rule, so closed eyes were detected and then
+    reported nowhere: zero warnings, exit 0, while the identical input warned for CN."""
+
+    def test_closed_eyes_warn_in_every_supported_mode(self):
+        for code in ("CN", "US", "EU", "NZ", None):
+            report = run(make_set(), EYES_SHUT, jurisdiction=code)
+            assert report.warnings, f"closed eyes produced no warning for {code}"
+
+    def test_generic_fallbacks_are_labelled_generic(self):
+        """A borrowed advisory must never look like that country's own law."""
+        report = run(make_set(), EYES_SHUT, jurisdiction="US")
+        borrowed = [f for f in report.findings if f.requirement.key.startswith("generic_")]
+        assert borrowed
+        assert all("GENERIC" in f.requirement.jurisdictions for f in borrowed)
+
+    def test_china_is_not_given_a_duplicate_expression_advisory(self):
+        """CN states its own expression rule; the generic one must not be added on top."""
+        keys = [f.requirement.key for f in run(make_set(), EYES_SHUT, jurisdiction="CN").findings]
+        assert "expression_neutral" in keys
+        assert "generic_expression_neutral" not in keys
