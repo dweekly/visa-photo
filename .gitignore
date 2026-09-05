@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv*/
+*.egg-info/
+build/
+dist/
+
+# Model artifacts - fetched, never committed (see THIRD_PARTY_LICENSES.md)
+*.task
+*.onnx
+*.pth
+
+# Local scratch
+.mplcache/
+*.local.*
+
+# macOS
+.DS_Store
+
+# Personal photographs must never be committed. Test fixtures live in
+# tests/fixtures/ and must be redistributable; see docs/PLAN.md.
+*.HEIC
+*.heic
