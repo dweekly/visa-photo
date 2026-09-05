@@ -134,6 +134,10 @@ def measure(image_rgb, result: MeasurementSet) -> None:
             "the subject reaches the top edge of the image; the crown is outside the frame "
             "or the photo is cropped too tightly to measure it",
         )
+        # Return, do not fall through. The widest part of a head is the hair near the crown,
+        # so if the crown is outside the frame the visible extent is a lower bound on the
+        # real width, not a measurement of it.
+        return
     else:
         result.add(Measurement(
             name="crown_y",

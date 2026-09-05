@@ -80,9 +80,24 @@ def _fetch_models() -> int:
     else:
         print(f"downloading landmark model -> {landmark}")
         landmark.parent.mkdir(parents=True, exist_ok=True)
+        import tempfile
         import urllib.request
 
-        urllib.request.urlretrieve(MODEL_URL, landmark)
+        # Download to a sibling and rename on success. Writing straight to the final path
+        # means an interrupted download leaves a truncated file that every later run treats
+        # as installed, so an ordinary Ctrl-C makes the tool permanently broken with no way
+        # to recover through the setup command itself.
+        handle, temporary = tempfile.mkstemp(dir=landmark.parent, suffix=".partial")
+        import os
+
+        os.close(handle)
+        temporary_path = Path(temporary)
+        try:
+            urllib.request.urlretrieve(MODEL_URL, temporary_path)
+            temporary_path.replace(landmark)
+        except BaseException:
+            temporary_path.unlink(missing_ok=True)
+            raise
         print("  done")
 
     weights = segmentation.model_path()

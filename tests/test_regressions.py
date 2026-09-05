@@ -191,3 +191,26 @@ class TestNoDetectedProblemIsHidden:
         keys = [f.requirement.key for f in run(make_set(), EYES_SHUT, jurisdiction="CN").findings]
         assert "expression_neutral" in keys
         assert "generic_expression_neutral" not in keys
+
+
+class TestTruncatedCrownAlsoBlocksWidth:
+    """Fifth review pass. The top-edge guard marked both measurements unavailable and then
+    fell through, overwriting the width with the visible extent. The widest part of a head is
+    the hair near the crown, so a truncated crown means the visible width is a lower bound,
+    not a measurement."""
+
+    def test_width_stays_unavailable_when_the_crown_is_cut_off(self):
+        matte = np.zeros((300, 400), dtype=bool)
+        matte[0:220, 100:300] = True  # runs off the top edge
+        result = TestMatteNoiseAndClipping().run_measure(matte)
+        assert result.get("crown_y").status.value == "unavailable"
+        assert result.get("head_width_silhouette").status.value == "unavailable", (
+            "a head whose crown is outside the frame has no measurable width"
+        )
+
+    def test_an_untruncated_head_still_measures_both(self):
+        matte = np.zeros((300, 400), dtype=bool)
+        matte[20:220, 100:300] = True
+        result = TestMatteNoiseAndClipping().run_measure(matte)
+        assert result.value("crown_y") == 20
+        assert result.value("head_width_silhouette") == 200
