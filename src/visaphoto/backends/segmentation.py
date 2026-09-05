@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..measurements import Confidence, Measurement, MeasurementSet, Status
-from ..thresholds import MATTE_BORDER_TOUCH_FRACTION
+from ..thresholds import HEAD_WIDTH_BAND_BELOW_EYES, MATTE_BORDER_TOUCH_FRACTION
 
 MODEL_NAME = "birefnet-general"
 
@@ -79,32 +79,71 @@ def measure(image_rgb, result: MeasurementSet) -> None:
             backend=f"rembg/{MODEL_NAME}", confidence=Confidence.MEASURED,
         ))
 
-    # Silhouette width measured across the head, not the shoulders: sample between the crown
-    # and a quarter of the way down the subject, where the head is widest and the torso has
-    # not yet entered.
-    bottom = int(rows.max())
-    head_band_end = top + max(1, (bottom - top) // 4)
-    band = solid[top:head_band_end]
-    widths = [
-        int(np.where(r)[0].max() - np.where(r)[0].min() + 1) for r in band if r.any()
-    ]
-    if widths:
+    width_px, reason = head_width_between(
+        solid, top, result.value("eye_line_y"), result.value("chin_y_landmark")
+    )
+    if width_px is None:
         result.add(Measurement(
             name="head_width_silhouette",
-            definition=(
-                "Widest horizontal extent of the matte across the upper quarter of the "
-                "subject, INCLUDING hair. This is the quantity China's diagram appears to "
-                "measure. It is not ICAO's ear-to-ear head width."
-            ),
-            status=Status.AVAILABLE, value=float(max(widths)), unit="px",
-            backend=f"rembg/{MODEL_NAME}", confidence=Confidence.MEASURED,
+            definition=HEAD_WIDTH_DEFINITION,
+            status=Status.UNAVAILABLE,
+            reason=reason or "the head width could not be measured",
         ))
     else:
         result.add(Measurement(
             name="head_width_silhouette",
-            definition="Widest horizontal extent of the matte across the head.",
-            status=Status.UNAVAILABLE, reason="no solid matte rows in the head band",
+            definition=HEAD_WIDTH_DEFINITION,
+            status=Status.AVAILABLE, value=float(width_px), unit="px",
+            backend=f"rembg/{MODEL_NAME}", confidence=Confidence.MEASURED,
         ))
+
+
+HEAD_WIDTH_DEFINITION = (
+    "Widest horizontal extent of the matte between the crown and the chin, INCLUDING hair. "
+    "This is the quantity China's diagram appears to measure. It is not ICAO's ear-to-ear "
+    "head width."
+)
+
+
+def head_width_between(
+    solid, top: int, eye_line_y: float | None, chin_y: float | None
+):
+    """Widest run of subject pixels between the crown and the chin.
+
+    Returns (width, None) or (None, reason).
+
+    Bounded by the head, never by a fraction of the subject's height. A fraction is not a
+    head: on a full-length photo the identical head yields shoulder width, and the result
+    still looks like a confident measurement.
+
+    The band stops part-way between the eye line and the chin rather than at the chin,
+    because the collar enters the silhouette above the chin row - measured on the reference
+    photo, the widest row between crown and chin was the chin row itself, at 1236 px against
+    a true head width of 1078. See thresholds.HEAD_WIDTH_BAND_BELOW_EYES.
+    """
+    import numpy as np
+
+    if chin_y is None or eye_line_y is None:
+        return None, (
+            "the chin or eye-line position is unavailable, so a head-only region of the matte "
+            "cannot be isolated; a fraction of subject height would measure the torso instead"
+        )
+    # Stop above the chin: the collar and shoulders enter the silhouette before the chin row.
+    band_end = eye_line_y + (chin_y - eye_line_y) * HEAD_WIDTH_BAND_BELOW_EYES
+    head_bottom = min(int(round(band_end)), solid.shape[0])
+    if head_bottom <= top:
+        return None, (
+            f"the chin (y={chin_y:.0f}) is not below the crown (y={top}); the matte and the "
+            "landmarks disagree about where the head is"
+        )
+    widths = [
+        int(np.where(r)[0].max() - np.where(r)[0].min() + 1)
+        for r in solid[top:head_bottom]
+        if r.any()
+    ]
+    if not widths:
+        return None, "the matte has no solid rows between the crown and the chin"
+    return max(widths), None
 
 
 def _unavailable(result: MeasurementSet, reason: str) -> None:

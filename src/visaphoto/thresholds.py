@@ -64,3 +64,19 @@ MATTE_BORDER_TOUCH_FRACTION: Final[float] = 0.02
 """If the person matte occupies more than this fraction of the image's top row, we treat the
 crown as truncated rather than measured — the head probably continues past the frame. Our own
 heuristic; the alternative is silently reporting the image edge as the top of someone's head."""
+
+HEAD_WIDTH_BAND_BELOW_EYES: Final[float] = 0.5
+"""How far from the eye line towards the chin to keep measuring head width, as a fraction.
+
+Our own heuristic, and it exists because bounding the band at the chin is not enough. Measured
+row widths on the reference photo, crown y=493 to chin y=2278:
+
+    y= 623  732      y=1403 1078  <- true peak, ear/temple level
+    y=1143 1076      y=2053  844  <- jaw, narrowing
+    y=1273 1074      y=2277 1236  <- collar and shoulders have entered the frame
+
+A head is widest at the ears, well above the chin, and the torso enters the silhouette before
+the chin row is reached. Taking the maximum over crown-to-chin therefore reports shoulder
+width. Stopping halfway between the eye line and the chin captures the real peak (1078) and
+stays clear of the collar.
+"""

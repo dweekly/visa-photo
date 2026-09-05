@@ -163,8 +163,7 @@ def _assess(
         return Finding(requirement, Outcome.NOT_EVALUATED,
                        requirement.note or "no signal available in this build")
 
-    key = requirement.key
-    if "resolution" in key:
+    if "ied" in requirement.signals:
         if ied is None:
             return Finding(requirement, Outcome.NOT_EVALUATED,
                            "inter-eye distance could not be measured")
@@ -176,15 +175,10 @@ def _assess(
         return Finding(requirement, Outcome.LIKELY_OK, detail, score=ied,
                        threshold=MIN_IED_PIXELS)
 
-    relevant = [flags[n] for n in ("smile", "mouth_open", "eyes_closed") if n in flags]
-    if "eyes_open" in key:
-        relevant = [flags[n] for n in ("eyes_closed",) if n in flags]
-    elif "expression" in key:
-        relevant = [flags[n] for n in ("smile", "mouth_open") if n in flags]
-
+    relevant = [flags[name] for name in requirement.signals if name in flags]
     if not relevant:
         return Finding(requirement, Outcome.NOT_EVALUATED,
-                       "the model returned no expression scores")
+                       "the model returned no scores for the signals this requirement needs")
     fired = [f for f in relevant if f.raised]
     if fired:
         return Finding(requirement, Outcome.WARN, "; ".join(f.detail for f in fired),

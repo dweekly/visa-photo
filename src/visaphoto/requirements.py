@@ -57,6 +57,12 @@ class Requirement:
     source: str
     check: Check
     note: str = ""
+    signals: tuple[str, ...] = ()
+    """Which advisory signals assess this requirement, named explicitly.
+
+    Explicit because inferring them from the key was a real defect: China's rule reads
+    "neutral with eyes open, mouth closed", and substring matching on "expression" silently
+    dropped the eyes-open half, so a photo with closed eyes passed."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +85,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         source=CN_SHEET,
         check=Check.ADVISORY_SIGNAL,
         note="Assessed with MediaPipe blendshapes against uncalibrated thresholds; see thresholds.py.",
+        signals=("smile", "mouth_open", "eyes_closed"),
     ),
     Requirement(
         key="expression_neutral_eu",
@@ -86,6 +93,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         quote="neutral expression, mouth closed",
         source=EU_GUIDANCE,
         check=Check.ADVISORY_SIGNAL,
+        signals=("smile", "mouth_open"),
     ),
     Requirement(
         key="eyes_open_eu",
@@ -93,6 +101,7 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         quote="eyes open and clearly visible",
         source=EU_GUIDANCE,
         check=Check.ADVISORY_SIGNAL,
+        signals=("eyes_closed",),
     ),
     Requirement(
         key="glasses_cn",
@@ -227,6 +236,7 @@ GENERIC_ADVISORIES: tuple[Requirement, ...] = (
         source=CN_SHEET,
         check=Check.ADVISORY_SIGNAL,
         note="Derived from the entries above, not from a single generic authority.",
+        signals=("smile", "mouth_open"),
     ),
     Requirement(
         key="generic_eyes_open",
@@ -235,6 +245,7 @@ GENERIC_ADVISORIES: tuple[Requirement, ...] = (
         source=EU_GUIDANCE,
         check=Check.ADVISORY_SIGNAL,
         note="Derived. Sunglasses or closed eyes are a common cause of rejection everywhere.",
+        signals=("eyes_closed",),
     ),
     Requirement(
         key="generic_no_tinted_lenses",
@@ -277,6 +288,7 @@ GENERIC_ADVISORIES: tuple[Requirement, ...] = (
         source="https://www.icao.int/sites/default/files/TRIP/Publications/TR-Portrait-Quality-v1.0.pdf",
         check=Check.ADVISORY_SIGNAL,
         note="The one generic advisory with a real numeric authority behind it.",
+        signals=("ied",),
     ),
 )
 
