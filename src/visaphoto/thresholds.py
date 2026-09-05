@@ -100,23 +100,34 @@ width. Stopping halfway between the eye line and the chin captures the real peak
 stays clear of the collar.
 """
 
-EYES_OBSCURED_RATIO: Final[float] = 1.0
+EYES_OBSCURED_RATIO: Final[float] = 1.12
 """Below this eye-region/cheek brightness ratio we advise the eyes look obscured.
 
-Measured across 9 photographs of one subject on 2026-09-04:
+Measured across 11 photographs of one subject on 2026-09-04:
 
-    mirrored sunglasses      0.54, 0.81
-    peaked cap shadowing eyes      0.75
-    clear prescription glasses   1.23, 1.28, 1.32
-    no glasses                   1.45, 1.45
-    sunglasses pushed up on head       1.63
+    obscured                              not obscured
+      0.54  mirrored shades + cap           1.23  clear glasses
+      0.75  peaked cap shadowing eyes       1.25  bare eyes (paired control)
+      0.81  mirrored shades + cap           1.28  clear glasses
+      1.01  mirrored shades, no cap         1.32  clear glasses
+                                            1.45  bare eyes
+                                            1.50  bare eyes
+                                            1.63  shades pushed up on head
 
-The gap between the worst acceptable photo (1.23) and the best unacceptable one (0.81) is
-wide, and 1.0 sits in it. Note what this signal is and is not: it detects tinted lenses and
-shadow across the eyes, which several sources prohibit together in one sentence. It does NOT
-detect lens glare, heavy frames occluding the eye, or clear glasses where a source bans
-glasses outright. Clear glasses do read lower than bare eyes (1.23-1.32 against 1.45-1.63),
-but on six samples that gap is too narrow to threshold."""
+The threshold was 1.0 until a controlled pair - the same mirrored sunglasses worn, then
+pushed up onto the head, same light and background - landed at 1.013 and escaped. The earlier
+sunglasses photographs had a peaked cap supplying the shadow; bare mirrored lenses reflect the
+room and stay bright. 1.12 is the midpoint of the real gap (1.013 to 1.233).
+
+Two consequences worth carrying:
+
+* **Brightness alone is a weak sunglasses detector.** It catches dark or shadowed eyes. It
+  nearly missed mirrored lenses, which the glare signal caught instead. The two are
+  complementary and neither is sufficient alone.
+* **Bare eyes and clear glasses cannot be separated by this signal.** The paired bare-eye
+  control (1.251) reads LOWER than two of the clear-glasses photographs (1.276, 1.315). An
+  earlier reading suggested a gap; with more data it is gone. Do not attempt to detect
+  spectacles this way."""
 
 EYE_GLARE_FRACTION: Final[float] = 0.003
 """Fraction of eye-region pixels near white above which we advise there may be glare.

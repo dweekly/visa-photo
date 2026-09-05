@@ -146,10 +146,16 @@ EYE_REGION = {
     "8857_glasses_glare":      (1.276, 0.0100),
     "8852_cap_shadowed_eyes":  (0.754, 0.0000),
     "8853_mirrored_shades":    (0.812, 0.0162),
+    # Controlled pair: identical light and background, shades worn then pushed up.
+    "8863_mirrored_shades":    (1.013, 0.0201),
+    "8864_shades_on_head":     (1.251, 0.0002),
 }
-EYES_LOOK_OBSCURED = {"8852_cap_shadowed_eyes", "8853_mirrored_shades"}
+EYES_LOOK_OBSCURED = {
+    "8852_cap_shadowed_eyes", "8853_mirrored_shades", "8863_mirrored_shades",
+}
 EYES_LOOK_GLARED = {
     "8855_clear_glasses", "8856_clear_glasses", "8857_glasses_glare", "8853_mirrored_shades",
+    "8863_mirrored_shades",
 }
 
 
@@ -206,3 +212,26 @@ def test_partial_assessment_is_stated_in_the_finding():
     finding = next(f for f in report.findings if f.requirement.key == "glasses_cn")
     assert "PARTIAL" in finding.detail
     assert "Frames" in finding.detail
+
+
+def test_mirrored_shades_without_a_cap_are_caught():
+    """The near-miss that moved the threshold. At 1.013 this photo sat just above the old
+    value of 1.0: bare mirrored lenses reflect the room, so brightness alone barely separates
+    them. Earlier sunglasses photographs were only caught because a peaked cap added shadow."""
+    assert glasses_outcome("8863_mirrored_shades") is Outcome.WARN
+
+
+def test_the_paired_control_passes():
+    """Same glasses, same light, same background - pushed up onto the head. If this warned,
+    the signal would be detecting eyewear rather than obscured eyes."""
+    assert glasses_outcome("8864_shades_on_head") is Outcome.LIKELY_OK
+
+
+def test_bare_eyes_and_clear_glasses_are_not_separable_by_brightness():
+    """Guards against a tempting wrong conclusion. The paired bare-eye control reads LOWER
+    (1.251) than two clear-glasses photographs (1.276, 1.315), so this signal must never be
+    used to decide whether someone is wearing spectacles - which matters because the US visa
+    channel bans them outright."""
+    bare = EYE_REGION["8864_shades_on_head"][0]
+    glasses = [EYE_REGION[k][0] for k in ("8856_clear_glasses", "8857_glasses_glare")]
+    assert bare < max(glasses), "the classes overlap; do not threshold between them"
