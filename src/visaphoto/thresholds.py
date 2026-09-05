@@ -99,3 +99,40 @@ the chin row is reached. Taking the maximum over crown-to-chin therefore reports
 width. Stopping halfway between the eye line and the chin captures the real peak (1078) and
 stays clear of the collar.
 """
+
+EYES_OBSCURED_RATIO: Final[float] = 1.0
+"""Below this eye-region/cheek brightness ratio we advise the eyes look obscured.
+
+Measured across 9 photographs of one subject on 2026-09-04:
+
+    mirrored sunglasses      0.54, 0.81
+    peaked cap shadowing eyes      0.75
+    clear prescription glasses   1.23, 1.28, 1.32
+    no glasses                   1.45, 1.45
+    sunglasses pushed up on head       1.63
+
+The gap between the worst acceptable photo (1.23) and the best unacceptable one (0.81) is
+wide, and 1.0 sits in it. Note what this signal is and is not: it detects tinted lenses and
+shadow across the eyes, which several sources prohibit together in one sentence. It does NOT
+detect lens glare, heavy frames occluding the eye, or clear glasses where a source bans
+glasses outright. Clear glasses do read lower than bare eyes (1.23-1.32 against 1.45-1.63),
+but on six samples that gap is too narrow to threshold."""
+
+EYE_GLARE_FRACTION: Final[float] = 0.003
+"""Fraction of eye-region pixels near white above which we advise there may be glare.
+
+Measured across 7 photographs on 2026-09-04 (fraction of pixels brighter than 240/255):
+
+    bare eyes, no glasses          0.0002, 0.0004
+    peaked cap shadowing the eyes  0.0000
+    glasses with visible glare     0.0100, 0.0117, 0.0340
+    mirrored sunglasses            0.0162
+
+0.003 sits in the 25x gap between bare eyes and glare. CN, EU and NZ all prohibit glare or
+reflection obscuring the eyes.
+
+IMPORTANT UNRESOLVED LIMITATION: every glasses photograph in the sample had visible glare, so
+we cannot yet tell whether this signal detects GLARE or merely detects LENSES. One photograph
+of clear glasses with the light moved off-axis would settle it. Until then the flag is
+advisory and may fire on any spectacles. A needless second look costs a user little; a missed
+glare costs them a rejected application."""

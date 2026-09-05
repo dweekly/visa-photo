@@ -135,8 +135,12 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "is no glare, shadows, or frames obscuring the eyes."
         ),
         source=CN_SHEET,
-        check=Check.NOT_ASSESSABLE,
-        note="No tint, glare or frame-occlusion detector in this build.",
+        check=Check.ADVISORY_SIGNAL,
+        note=(
+            "PARTIAL: tint, shadow and glare across the eyes are assessed. Frames "
+            "obscuring the eyes are NOT - a pass here does not cover that clause."
+        ),
+        signals=("eyes_obscured", "eye_glare"),
     ),
     Requirement(
         key="glasses_us_visa",
@@ -158,7 +162,11 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             "not create a glare or reflection in the photo."
         ),
         source=NZ_PHOTOS,
-        check=Check.NOT_ASSESSABLE,
+        check=Check.ADVISORY_SIGNAL,
+        note=(
+            "PARTIAL: tinted lenses, shadow and glare are assessed. Heavy frames are NOT."
+        ),
+        signals=("eyes_obscured", "eye_glare"),
     ),
     Requirement(
         key="head_covering_cn",
@@ -279,8 +287,9 @@ GENERIC_ADVISORIES: tuple[Requirement, ...] = (
             "eyeglasses outright."
         ),
         source=NZ_PHOTOS,
-        check=Check.NOT_ASSESSABLE,
-        note="Derived. We have no tint or glare detector, so this is reported as not evaluated.",
+        check=Check.ADVISORY_SIGNAL,
+        note="Derived. PARTIAL: tint, shadow and glare are assessed; frames are not.",
+        signals=("eyes_obscured", "eye_glare"),
     ),
     Requirement(
         key="generic_plain_background",

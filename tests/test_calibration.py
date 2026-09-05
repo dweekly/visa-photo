@@ -133,3 +133,76 @@ class TestKnownMisses:
         """eyeWide reads 0.029/0.046 on a deliberate wide stare against 0.004 neutral - too
         small a separation to threshold."""
         assert outcome("8842_wide_stare", "expression_neutral") is Outcome.LIKELY_OK
+
+
+# --- Eye-region signals, second posed set (2026-09-04) -----------------------------------
+# file -> (eye/cheek brightness ratio, near-white fraction), as measured.
+EYE_REGION = {
+    "8833_bare_eyes":          (1.500, 0.0002),
+    "8862_bare_eyes":          (1.451, 0.0004),
+    "8858_shades_on_head":     (1.627, 0.0004),
+    "8855_clear_glasses":      (1.233, 0.0117),
+    "8856_clear_glasses":      (1.315, 0.0340),
+    "8857_glasses_glare":      (1.276, 0.0100),
+    "8852_cap_shadowed_eyes":  (0.754, 0.0000),
+    "8853_mirrored_shades":    (0.812, 0.0162),
+}
+EYES_LOOK_OBSCURED = {"8852_cap_shadowed_eyes", "8853_mirrored_shades"}
+EYES_LOOK_GLARED = {
+    "8855_clear_glasses", "8856_clear_glasses", "8857_glasses_glare", "8853_mirrored_shades",
+}
+
+
+def eye_region_set(name: str) -> MeasurementSet:
+    ratio, specular = EYE_REGION[name]
+    result = build("8833_neutral")
+    result.source = name
+    for field, value, unit in (
+        ("eye_brightness_ratio", ratio, "ratio"),
+        ("eye_specular_fraction", specular, "fraction"),
+    ):
+        result.add(Measurement(
+            name=field, definition="d", status=Status.AVAILABLE, value=value,
+            unit=unit, backend="posed-set", confidence=Confidence.ADVISORY,
+        ))
+    return result
+
+
+def glasses_outcome(name: str) -> Outcome:
+    report = run(eye_region_set(name), scores("8833_neutral"), jurisdiction="CN")
+    for finding in report.findings:
+        if finding.requirement.key == "glasses_cn":
+            return finding.outcome
+    raise AssertionError("no glasses finding")
+
+
+@pytest.mark.parametrize("name", sorted(EYES_LOOK_OBSCURED | EYES_LOOK_GLARED))
+def test_obscured_or_glared_eyes_warn(name):
+    assert glasses_outcome(name) is Outcome.WARN
+
+
+@pytest.mark.parametrize(
+    "name", sorted(set(EYE_REGION) - EYES_LOOK_OBSCURED - EYES_LOOK_GLARED)
+)
+def test_clearly_visible_eyes_do_not_warn(name):
+    assert glasses_outcome(name) is Outcome.LIKELY_OK
+
+
+def test_sunglasses_pushed_up_onto_the_head_are_not_flagged():
+    """Spectacles present in the photo but not over the eyes are not a problem, and the
+    signal is about the eye region rather than about detecting eyewear."""
+    assert glasses_outcome("8858_shades_on_head") is Outcome.LIKELY_OK
+
+
+def test_shadowed_eyes_are_caught_even_with_no_eyewear():
+    """A peaked cap shadowing the eyes trips the same rule. CN prohibits shadows over the
+    eyes in the same sentence as tint, so this is the rule working, not a coincidence."""
+    assert glasses_outcome("8852_cap_shadowed_eyes") is Outcome.WARN
+
+
+def test_partial_assessment_is_stated_in_the_finding():
+    """A pass must not read as covering clauses we cannot check."""
+    report = run(eye_region_set("8833_bare_eyes"), scores("8833_neutral"), jurisdiction="CN")
+    finding = next(f for f in report.findings if f.requirement.key == "glasses_cn")
+    assert "PARTIAL" in finding.detail
+    assert "Frames" in finding.detail

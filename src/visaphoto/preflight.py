@@ -24,6 +24,8 @@ from typing import Any
 from .measurements import Flag, MeasurementSet
 from .requirements import GENERIC_ADVISORIES, Check, Requirement, for_jurisdiction
 from .thresholds import (
+    EYES_OBSCURED_RATIO,
+    EYE_GLARE_FRACTION,
     EYE_CLOSED_SCORE,
     JAW_OPEN_SCORE,
     MIN_IED_PIXELS,
@@ -125,6 +127,28 @@ def _expression_flags(scores: dict[str, float], result: MeasurementSet) -> dict[
             ),
         )
 
+    ratio = result.value("eye_brightness_ratio")
+    if ratio is not None:
+        flags["eyes_obscured"] = Flag(
+            name="eyes_obscured", raised=ratio < EYES_OBSCURED_RATIO, score=ratio,
+            threshold=EYES_OBSCURED_RATIO,
+            detail=(
+                f"the eye region is {ratio:.2f}x the brightness of the cheek (below "
+                f"{EYES_OBSCURED_RATIO} suggests tinted lenses or shadow across the eyes)"
+            ),
+        )
+
+    glare = result.value("eye_specular_fraction")
+    if glare is not None:
+        flags["eye_glare"] = Flag(
+            name="eye_glare", raised=glare > EYE_GLARE_FRACTION, score=glare,
+            threshold=EYE_GLARE_FRACTION,
+            detail=(
+                f"{glare * 100:.2f}% of the eye region is near-white (above "
+                f"{EYE_GLARE_FRACTION * 100:.1f}% suggests glare or a reflective lens)"
+            ),
+        )
+
     result.flags.extend(flags.values())
     return flags
 
@@ -192,12 +216,16 @@ def _assess(
     if not relevant:
         return Finding(requirement, Outcome.NOT_EVALUATED,
                        "the model returned no scores for the signals this requirement needs")
+    scope = f" [{requirement.note}]" if requirement.note.startswith(
+        ("PARTIAL", "Derived. PARTIAL")
+    ) else ""
     fired = [f for f in relevant if f.raised]
     if fired:
-        return Finding(requirement, Outcome.WARN, "; ".join(f.detail for f in fired),
+        return Finding(requirement, Outcome.WARN,
+                       "; ".join(f.detail for f in fired) + scope,
                        score=fired[0].score, threshold=fired[0].threshold)
     return Finding(requirement, Outcome.LIKELY_OK,
-                   "; ".join(f.detail for f in relevant))
+                   "; ".join(f.detail for f in relevant) + scope)
 
 
 def _assess_pose(requirement: Requirement, result: MeasurementSet) -> Finding:

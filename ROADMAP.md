@@ -100,6 +100,30 @@ test and forces this section to be updated.
 generalise across age, skin tone, facial hair or capture device. Broadening it is the single
 highest-value thing that could be done for detection quality.
 
+## Gaze direction - measured, promising, not yet shippable
+
+Every source surveyed requires the subject to look directly at the camera, and a photo can
+have acceptable head pose while the eyes look elsewhere. MediaPipe's `eyeLook*` blendshapes
+respond strongly - measured on posed photographs 2026-09-04:
+
+    looking at camera        eyeLookInLeft 0.002  eyeLookOutRight 0.010
+    gaze averted sideways    eyeLookInLeft 0.650  eyeLookOutRight 0.651
+    looking down             eyeLookDownLeft 0.538 / DownRight 0.544 (neutral: 0.130 / 0.135)
+
+Two problems stop it shipping today.
+
+**The signal is head-relative, not camera-relative.** A subject looking straight at the lens
+with the head turned shows large eye rotation, because the eyes are compensating for the head.
+Separating "looking away" from "looking at the camera with a turned head" needs the gaze
+combined with head yaw, which is an algorithm to validate rather than a threshold to pick.
+
+**Mirrored sunglasses corrupt it.** Behind opaque lenses the iris landmarks are fabricated,
+and the sunglasses photo reports eyeLookDown 0.47/0.45 - indistinguishable from genuinely
+looking down. Any gaze check must therefore run after, and be gated on, the eyes being visible.
+
+Also unhandled: crossed or divergent eyes. The one example measured looks identical to a
+straight-ahead gaze under this signal.
+
 ## Known work not yet scheduled
 
 - **Pose acceptance gate.** Pose is advisory until measured against known angles near the actual

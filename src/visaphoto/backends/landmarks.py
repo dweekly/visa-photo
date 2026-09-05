@@ -176,6 +176,37 @@ def measure(image_rgb, model: Path, result: MeasurementSet) -> dict[str, float]:
         ),
     ))
 
+    eye_patch = _eye_patch(np.asarray(image_rgb), (left_x, left_y), (right_x, right_y), ied)
+    if eye_patch is None:
+        add(Measurement(
+            name="eye_specular_fraction", definition=EYE_GLARE_DEFINITION,
+            status=Status.UNAVAILABLE,
+            reason="the eye sampling region falls outside the image",
+        ))
+    else:
+        add(Measurement(
+            name="eye_specular_fraction", definition=EYE_GLARE_DEFINITION,
+            status=Status.AVAILABLE,
+            value=float((eye_patch.max(axis=2) > NEAR_WHITE).mean()),
+            unit="fraction", backend="mediapipe+pixels", confidence=Confidence.ADVISORY,
+        ))
+
+    ratio = _eye_region_brightness_ratio(np.asarray(image_rgb), (left_x, left_y), (right_x, right_y), ied)
+    if ratio is None:
+        add(Measurement(
+            name="eye_brightness_ratio",
+            definition=EYE_BRIGHTNESS_DEFINITION,
+            status=Status.UNAVAILABLE,
+            reason="the eye or cheek sampling region falls outside the image",
+        ))
+    else:
+        add(Measurement(
+            name="eye_brightness_ratio",
+            definition=EYE_BRIGHTNESS_DEFINITION,
+            status=Status.AVAILABLE, value=ratio, unit="ratio",
+            backend="mediapipe+pixels", confidence=Confidence.ADVISORY,
+        ))
+
     if detection.facial_transformation_matrixes:
         pitch, yaw, roll = _euler_degrees(detection.facial_transformation_matrixes[0])
         for name, value, axis in (
@@ -200,6 +231,64 @@ def measure(image_rgb, model: Path, result: MeasurementSet) -> dict[str, float]:
     if detection.face_blendshapes:
         scores = {c.category_name: float(c.score) for c in detection.face_blendshapes[0]}
     return scores
+
+
+NEAR_WHITE = 240
+"""Channel value at which a pixel counts as a specular highlight rather than skin or iris."""
+
+EYE_GLARE_DEFINITION = (
+    "Fraction of pixels in the eye region with any channel brighter than 240/255, i.e. "
+    "specular highlights. Fires on lens glare and on reflective lenses. It may also fire on "
+    "clear spectacles without glare - see thresholds.EYE_GLARE_FRACTION."
+)
+
+
+def _eye_patch(pixels, left, right, ied: float):
+    """The rectangle spanning both eyes, or None if it leaves the frame."""
+    height, width = pixels.shape[:2]
+    (lx, ly), (rx, ry) = left, right
+    half = int(ied * 0.32)
+    if half < 1:
+        return None
+    top, bottom = int((ly + ry) / 2) - half, int((ly + ry) / 2) + half
+    x0, x1 = int(min(lx, rx)) - half, int(max(lx, rx)) + half
+    if top < 0 or x0 < 0 or x1 > width or bottom > height:
+        return None
+    patch = pixels[top:bottom, x0:x1]
+    return patch if patch.size else None
+
+
+EYE_BRIGHTNESS_DEFINITION = (
+    "Mean brightness of the region spanning both eyes, divided by the mean brightness of a "
+    "cheek patch below them. Below 1 the eyes are markedly darker than the face, which "
+    "indicates tinted lenses or shadow across the eyes. It does not distinguish the two, and "
+    "says nothing about glare or frame occlusion."
+)
+
+
+def _eye_region_brightness_ratio(pixels, left, right, ied: float):
+    """Ratio of eye-region to cheek brightness, or None if either patch leaves the frame."""
+    import numpy as np
+
+    height, width = pixels.shape[:2]
+    (lx, ly), (rx, ry) = left, right
+    half = int(ied * 0.32)
+    if half < 1:
+        return None
+    eye_top, eye_bottom = int((ly + ry) / 2) - half, int((ly + ry) / 2) + half
+    eye_left, eye_right = int(min(lx, rx)) - half, int(max(lx, rx)) + half
+    cheek_top = int((ly + ry) / 2 + ied * 0.75)
+    cheek_bottom = cheek_top + half
+    if eye_top < 0 or eye_left < 0 or eye_right > width or cheek_bottom > height:
+        return None
+    eye = pixels[eye_top:eye_bottom, eye_left:eye_right]
+    cheek = pixels[cheek_top:cheek_bottom, int(min(lx, rx)):int(max(lx, rx))]
+    if eye.size == 0 or cheek.size == 0:
+        return None
+    cheek_mean = float(np.mean(cheek))
+    if cheek_mean <= 0:
+        return None
+    return float(np.mean(eye)) / cheek_mean
 
 
 def _sanity_check(chin_y: float, eye_line: float, ied: float) -> None:
