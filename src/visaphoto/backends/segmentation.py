@@ -48,6 +48,36 @@ ALPHA_SOLID = 200
 MIN_ROW_PIXELS = 8
 
 
+def _face_component(solid, result: MeasurementSet):
+    """Keep only the connected foreground region containing the face.
+
+    Segmentation noise is not anatomy. A single detached foreground pixel near the frame
+    edge spans the row-width calculation and inflates a measured head width - reproduced at
+    200px -> 291px by one stray pixel. Restricting to the component under the eyes removes
+    that whole class.
+
+    Falls back to the unmodified matte if the face position is unknown or the component
+    cannot be identified; the caller's other guards still apply.
+    """
+    eye_x, eye_y = result.value("eye_mid_x"), result.value("eye_line_y")
+    if eye_x is None or eye_y is None:
+        return solid
+    try:
+        from scipy import ndimage
+    except Exception:  # noqa: BLE001
+        return solid
+    labels, count = ndimage.label(solid)
+    if count <= 1:
+        return solid
+    row, col = int(round(eye_y)), int(round(eye_x))
+    if not (0 <= row < labels.shape[0] and 0 <= col < labels.shape[1]):
+        return solid
+    face_label = labels[row, col]
+    if face_label == 0:
+        return solid
+    return labels == face_label
+
+
 def measure(image_rgb, result: MeasurementSet) -> None:
     """Add matte-derived measurements to `result`. Never raises for a bad matte - it records
     the measurement as unavailable, because geometry from landmarks is still useful."""
@@ -82,7 +112,10 @@ def measure(image_rgb, result: MeasurementSet) -> None:
         _unavailable(result, f"segmentation failed: {exc!r}")
         return
 
-    solid = alpha > ALPHA_SOLID
+    # Isolate the face's connected region BEFORE anything is measured, so that crown and
+    # width both benefit. Segmentation noise is not anatomy: one detached speck above the
+    # head moves the measured crown, and one near the frame edge inflates the measured width.
+    solid = _face_component(alpha > ALPHA_SOLID, result)
     per_row = solid.sum(axis=1)
     rows = np.where(per_row >= MIN_ROW_PIXELS)[0]
 
@@ -136,36 +169,6 @@ HEAD_WIDTH_DEFINITION = (
     "This is the quantity China's diagram appears to measure. It is not ICAO's ear-to-ear "
     "head width."
 )
-
-
-def _face_component(solid, result: MeasurementSet):
-    """Keep only the connected foreground region containing the face.
-
-    Segmentation noise is not anatomy. A single detached foreground pixel near the frame
-    edge spans the row-width calculation and inflates a measured head width - reproduced at
-    200px -> 291px by one stray pixel. Restricting to the component under the eyes removes
-    that whole class.
-
-    Falls back to the unmodified matte if the face position is unknown or the component
-    cannot be identified; the caller's other guards still apply.
-    """
-    eye_x, eye_y = result.value("eye_mid_x"), result.value("eye_line_y")
-    if eye_x is None or eye_y is None:
-        return solid
-    try:
-        from scipy import ndimage
-    except Exception:  # noqa: BLE001
-        return solid
-    labels, count = ndimage.label(solid)
-    if count <= 1:
-        return solid
-    row, col = int(round(eye_y)), int(round(eye_x))
-    if not (0 <= row < labels.shape[0] and 0 <= col < labels.shape[1]):
-        return solid
-    face_label = labels[row, col]
-    if face_label == 0:
-        return solid
-    return labels == face_label
 
 
 def head_width_between(

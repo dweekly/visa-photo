@@ -7,6 +7,8 @@ explicit "unavailable".
 
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 
 from visaphoto.backends.segmentation import head_width_between
@@ -96,6 +98,32 @@ class TestMatteNoiseAndClipping:
         solid[20:220, 100:300] = True  # 200 px wide head
         return solid
 
+    def run_measure(self, matte):
+        """Exercise segmentation.measure end to end with a synthetic matte.
+
+        rembg is stubbed so no model download or inference happens; everything else - the
+        component isolation, the crown guard, the band bounds, the clipping guard - is the
+        real production path.
+        """
+        import numpy as np
+        import rembg
+        from PIL import Image
+
+        from visaphoto.backends import segmentation
+
+        rgba = np.zeros((*matte.shape, 4), dtype=np.uint8)
+        rgba[..., 3] = np.where(matte, 255, 0)
+
+        import pytest
+
+        result = self._result()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(segmentation, "model_path", lambda: pathlib.Path(__file__))
+            patch.setattr(rembg, "new_session", lambda *a, **k: None)
+            patch.setattr(rembg, "remove", lambda *a, **k: Image.fromarray(rgba, "RGBA"))
+            segmentation.measure(Image.new("RGB", (matte.shape[1], matte.shape[0])), result)
+        return result
+
     def _result(self, eye_x=200.0, eye_y=120.0, chin=219.0):
         from visaphoto.measurements import Confidence, Measurement, MeasurementSet, Status
 
@@ -109,18 +137,26 @@ class TestMatteNoiseAndClipping:
         return r
 
     def test_one_stray_pixel_does_not_inflate_head_width(self):
-        """A single detached foreground pixel near the frame edge took 200 px to 291 px."""
-        from visaphoto.backends.segmentation import _face_component
+        """A single detached foreground pixel near the frame edge took 200 px to 291 px.
 
-        solid = self.head_matte()
-        clean, _ = head_width_between(solid, 20, 120.0, 219.0)
-        assert clean == 200
+        Driven through segmentation.measure, not through the helper. An earlier version of
+        this test called the helper directly, so it passed while the production path never
+        invoked the helper at all - the fix was written and silently not wired in."""
+        clean = self.run_measure(self.head_matte())
+        assert clean.value("head_width_silhouette") == 200
 
         noisy = self.head_matte()
         noisy[60, 390] = True
-        isolated = _face_component(noisy, self._result())
-        measured, _ = head_width_between(isolated, 20, 120.0, 219.0)
-        assert measured == 200, "segmentation noise must not be measured as anatomy"
+        measured = self.run_measure(noisy)
+        assert measured.value("head_width_silhouette") == 200, (
+            "segmentation noise must not be measured as anatomy"
+        )
+
+    def test_a_speck_above_the_head_does_not_become_the_crown(self):
+        """A detached 10px speck moved the measured crown from y=20 to y=5."""
+        speckled = self.head_matte()
+        speckled[5:8, 40:50] = True
+        assert self.run_measure(speckled).value("crown_y") == 20
 
     def test_head_clipped_at_the_side_is_unavailable(self):
         """Cropping through the hair leaves both eyes visible, so landmarks cannot catch it."""
