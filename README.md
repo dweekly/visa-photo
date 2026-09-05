@@ -70,6 +70,7 @@ report is evidence, not a promise of acceptance.
 | Document | What it is |
 |---|---|
 | [docs/PLAN.md](docs/PLAN.md) | The full design and staged delivery plan. Fresh as of 2026-09-06. |
+| [docs/STAGE2-SOLVER.md](docs/STAGE2-SOLVER.md) | Working plan for the geometry solver. Fresh as of 2026-09-04. |
 | [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md) | Approaches that failed, so they aren't retried. Fresh as of 2026-09-04. |
 | [ROADMAP.md](ROADMAP.md) | Stack-ranked next steps. Fresh as of 2026-09-06. |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing changes per release. |
