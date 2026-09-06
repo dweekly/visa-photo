@@ -165,6 +165,10 @@ class Flag:
     detail: str
     score: float | None = None
     threshold: float | None = None
+    complete: bool = True
+    """False when some input the flag needed was unavailable - one eye's patch off the frame,
+    say. A raised flag stands regardless; an unraised incomplete flag is not a clean result,
+    and the consumer must not report it as one."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -173,6 +177,7 @@ class Flag:
             "detail": self.detail,
             "score": self.score,
             "threshold": self.threshold,
+            "complete": self.complete,
         }
 
 

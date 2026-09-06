@@ -252,10 +252,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CANNOT_MEASURE
 
     face = measurements.gate_record["face_detected_one"]
-    if face.satisfied is not True:
+    cannot_measure = face.satisfied is not True
+    if cannot_measure:
         print(f"cannot measure: {face.detail}", file=sys.stderr)
-        if not args.json:
-            return EXIT_CANNOT_MEASURE
     plan = make_plan(PROFILES[args.spec], measurements) if args.spec else None
 
     if args.json:
@@ -273,6 +272,11 @@ def main(argv: list[str] | None = None) -> int:
         if plan:
             _render_plan(plan)
 
+    # The report is emitted in every case so a caller can see what was established; the exit
+    # code still says the photo could not be measured. Checked before plan feasibility, so a
+    # missing face is never mistaken for a geometric refusal.
+    if cannot_measure:
+        return EXIT_CANNOT_MEASURE
     if plan and not plan.feasible:
         return EXIT_NO_CROP
     return EXIT_WARNINGS if preflight.warnings else EXIT_OK

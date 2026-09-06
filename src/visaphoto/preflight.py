@@ -137,7 +137,7 @@ def _expression_flags(scores: dict[str, float], result: MeasurementSet) -> dict[
         missing = [s for s, r in ratios.items() if r is None]
         flags["eyes_obscured"] = Flag(
             name="eyes_obscured", raised=worst < EYES_OBSCURED_RATIO, score=worst,
-            threshold=EYES_OBSCURED_RATIO,
+            threshold=EYES_OBSCURED_RATIO, complete=not missing,
             detail=(
                 "eye/cheek brightness "
                 + ", ".join(f"{s} {r:.2f}" for s, r in assessed.items())
@@ -152,7 +152,7 @@ def _expression_flags(scores: dict[str, float], result: MeasurementSet) -> dict[
         worst = max(assessed.values())
         flags["eye_glare"] = Flag(
             name="eye_glare", raised=worst > EYE_GLARE_FRACTION, score=worst,
-            threshold=EYE_GLARE_FRACTION,
+            threshold=EYE_GLARE_FRACTION, complete=len(assessed) == 2,
             detail=(
                 "near-white fraction of eye patch "
                 + ", ".join(f"{s} {g * 100:.2f}%" for s, g in assessed.items())
@@ -235,6 +235,14 @@ def _assess(
         return Finding(requirement, Outcome.WARN,
                        "; ".join(f.detail for f in fired) + scope,
                        score=fired[0].score, threshold=fired[0].threshold)
+    # A warning from any assessed input stands. A clean result needs every input assessed:
+    # one eye off the frame and the other clear is not "eyes clear", it is half an answer.
+    incomplete = [f for f in relevant if not f.complete]
+    if incomplete:
+        return Finding(requirement, Outcome.NOT_EVALUATED,
+                       "; ".join(f.detail for f in incomplete)
+                       + " - not every input could be assessed, so no clean result is claimed"
+                       + scope)
     return Finding(requirement, Outcome.LIKELY_OK,
                    "; ".join(f.detail for f in relevant) + scope)
 

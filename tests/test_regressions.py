@@ -281,3 +281,55 @@ class TestPosedSetGates:
         The remedy is the tunable in thresholds.py, not a silent widening."""
         r = run(lm=landmarks(matrix=pitch_matrix(24.2)))
         assert r.status("eye_line_y") is Status.UNAVAILABLE
+
+
+class TestReviewPassOne:
+    """Independent review of the Stage 1b diff, pass one. Both reproduced through the
+    production path."""
+
+    def test_one_eye_off_frame_is_not_a_clean_glasses_result(self):
+        """Left iris at x=50 puts its patches outside the frame; the right eye reads clear.
+        That is half an answer, and the machine-readable outcome must say so."""
+        from visaphoto.preflight import Outcome, run as preflight_run
+
+        r = run(lm=landmarks(left=(50.0, 300.0), right=(250.0, 300.0)))
+        assert r.status("patch_brightness_ratio:left") is Status.UNAVAILABLE
+        assert r.status("patch_brightness_ratio:right") is Status.AVAILABLE
+        report = preflight_run(r, dict(NEUTRAL), jurisdiction="CN")
+        glasses = next(f for f in report.findings if f.requirement.key == "glasses_cn")
+        assert glasses.outcome is Outcome.NOT_EVALUATED
+        assert "left eye not assessable" in glasses.detail
+
+    def test_a_warning_from_the_assessed_eye_still_stands(self):
+        from visaphoto.preflight import Outcome, run as preflight_run
+
+        px = pixels()
+        px[240:360, 120:480] = 40  # both eye bands dark; only the right is assessable
+        r = run(lm=landmarks(left=(50.0, 300.0), right=(250.0, 300.0)), px=px)
+        report = preflight_run(r, dict(NEUTRAL), jurisdiction="CN")
+        glasses = next(f for f in report.findings if f.requirement.key == "glasses_cn")
+        assert glasses.outcome is Outcome.WARN
+
+    def test_json_output_keeps_the_cannot_measure_exit_code(self, monkeypatch, tmp_path, capsys):
+        """`--json` emitted the report and then exited 0 (or 4 with --spec) on a photo with
+        no face, so a script could not tell failed measurement from success."""
+        import json
+        from pathlib import Path
+
+        from visaphoto import cli
+        from visaphoto.preflight import run as preflight_run
+
+        photo = tmp_path / "p.jpg"
+        photo.write_bytes(b"not really a jpeg")
+        no_face = run(lm=landmarks(faces=0))
+
+        def fake_measure_photo(*a, **k):
+            return no_face, preflight_run(no_face, {}, jurisdiction=None)
+
+        monkeypatch.setattr(cli, "measure_photo", fake_measure_photo)
+        for extra in ([], ["--spec", "cn_visa_digital"]):
+            code = cli.main([str(photo), "--json", *extra])
+            out = capsys.readouterr()
+            assert code == cli.EXIT_CANNOT_MEASURE, extra
+            assert json.loads(out.out)["measurements"]["source"] == "synthetic"
+            assert "cannot measure" in out.err
