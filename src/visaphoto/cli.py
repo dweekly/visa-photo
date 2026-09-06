@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from .geometry import Infeasible, Solution
-from .encode import encode
+from .encode import EncodeResult, encode
 from .measure import MeasurementError, load_source, measure_photo
 from .plan import make_plan
 from .preflight import Outcome
@@ -248,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: no such file: {args.photo}", file=sys.stderr)
         return EXIT_USAGE
 
+    out_unusable: str | None = None
     if args.out is not None:
         if args.spec is None:
             print("error: --out requires --spec: a file is rendered for one destination profile",
@@ -259,7 +260,13 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_USAGE
         # samefile, not path equality: on a case-insensitive filesystem PHOTO.jpg and photo.jpg
         # resolve to different strings and the same file, as does a hard link anywhere.
-        if args.out.exists() and args.out.samefile(args.photo):
+        try:
+            same = args.out.exists() and args.out.samefile(args.photo)
+        except OSError as exc:
+            # The destination cannot even be inspected (a directory the user cannot traverse).
+            # That is a write failure, reported with the rest of the run rather than raised here.
+            same, out_unusable = False, f"could not check {args.out}: {exc}"
+        if same:
             print("error: --out is the input photo; the original is never overwritten",
                   file=sys.stderr)
             return EXIT_USAGE
@@ -287,7 +294,9 @@ def main(argv: list[str] | None = None) -> int:
     rendered = encoded = None
     if args.out is not None and plan is not None and plan.feasible and not cannot_measure:
         rendered = render(source, plan)
-        if rendered.rendered:
+        if rendered.rendered and out_unusable:
+            encoded = EncodeResult("write_failed", None, None, None, [], out_unusable)
+        elif rendered.rendered:
             encoded = encode(rendered.image, PROFILES[args.spec].encoding, args.out)
 
     if args.json:

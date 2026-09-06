@@ -408,6 +408,29 @@ class TestCli:
         assert report["render"]["rendered"] is True
         assert report["encode"]["status"] == "write_failed"
 
+    def test_a_destination_that_cannot_be_inspected_is_reported_not_raised(self, tmp_path, monkeypatch, capsys):
+        """`Path.exists()` raises when the destination's directory cannot be traversed; the
+        report is still emitted and the failure is the encode result, exit 5."""
+        photo = write_photo(tmp_path / "p.jpg", textured(600, 800, sigma=20))
+        stub_fits(monkeypatch)
+        out = tmp_path / "forbidden" / "o.jpg"
+        real_exists = Path.exists
+
+        def exists(self):
+            if self == out:
+                raise PermissionError(errno.EACCES, "Permission denied", str(self))
+            return real_exists(self)
+
+        monkeypatch.setattr(Path, "exists", exists)
+        code = cli.main([str(photo), "--spec", "cn_visa_digital", "--out", str(out),
+                         "--model", str(photo), "--json"])
+        report = json.loads(capsys.readouterr().out)
+        assert code == cli.EXIT_NOT_WRITTEN
+        assert report["render"]["rendered"] is True
+        assert report["encode"]["status"] == "write_failed"
+        assert "Permission denied" in report["encode"]["detail"]
+        assert not out.parent.exists()  # no write was attempted
+
     def test_nothing_fits_exits_5_and_writes_nothing(self, tmp_path, monkeypatch, capsys):
         photo = write_photo(tmp_path / "p.jpg", flat(rgb=(128, 128, 128)))  # under the floor at every quality
         stub_fits(monkeypatch)
