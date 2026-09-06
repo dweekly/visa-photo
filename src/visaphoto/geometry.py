@@ -94,6 +94,12 @@ class Constraint:
     """Hard constraints must hold but earn no slack reward - source containment, for instance.
     Without this a crop drifts toward the middle of the photograph for no reason."""
 
+    preference: bool = False
+    """A composition preference of this tool, not a rule anyone published. Preferences take
+    part in the slack objective - the solver honours them where the rules leave room - but
+    never in feasibility or placement bounds, so a preference can never make a crop that
+    satisfies every published rule infeasible. Their slack may legitimately be negative."""
+
     def __post_init__(self) -> None:
         if self.lo is None and self.hi is None:
             raise ValueError(f"{self.rule}: a constraint with no bounds constrains nothing")
@@ -149,6 +155,8 @@ def _split(constraints: Iterable[Constraint], axis: str):
     other = "c" if axis == "b" else "b"
 
     for con in constraints:
+        if con.preference:
+            continue  # preferences never bound feasibility or placement
         coeff = getattr(con, axis)
         if getattr(con, other) != 0.0:
             continue  # belongs to the other axis
@@ -270,15 +278,26 @@ class Infeasible:
             "reason": self.reason,
             "detail": self.detail,
             "conflicting_rules": [list(p) for p in self.conflicting_rules],
-            "scale_bands": {k: list(v) for k, v in self.scale_bands.items()},
+            "scale_bands": {
+                k: [None if math.isinf(x) else x for x in v] for k, v in self.scale_bands.items()
+            },
         }
 
 
 _SOURCE_PREFIX = "source_"
 
 
-def _is_source(tag: str | None) -> bool:
+def _only_source(tag: str | None) -> bool:
     return tag is not None and all(
+        part.strip().startswith(_SOURCE_PREFIX) for part in tag.split("&")
+    )
+
+
+def _involves_source(tag: str | None) -> bool:
+    """A pairwise tag such as "crown_gap & source_bottom" involves the source even though it
+    is not only the source. The first version of this check used all(), so such a collision
+    was classified as two published rules disagreeing."""
+    return tag is not None and any(
         part.strip().startswith(_SOURCE_PREFIX) for part in tag.split("&")
     )
 
@@ -293,14 +312,14 @@ def _classify(feasible: _Tagged, output_width: int, output_height: int,
     """
     lo_rule, hi_rule = feasible.lo_rule or "?", feasible.hi_rule or "?"
     lo, hi = feasible.interval.lo, feasible.interval.hi
-    if _is_source(lo_rule) and _is_source(hi_rule):
+    if _only_source(lo_rule) and _only_source(hi_rule):
         return Infeasible(
             reason="source_too_small",
             detail=(f"the {output_width}x{output_height} crop cannot fit inside the source "
                     "image at any scale"),
             conflicting_rules=[(lo_rule, hi_rule)], scale_bands=per_rule,
         )
-    if _is_source(lo_rule) or _is_source(hi_rule):
+    if _involves_source(lo_rule) or _involves_source(hi_rule):
         return Infeasible(
             reason="source_too_small",
             detail=(f"a published rule and the source image's edges cannot both be satisfied "
@@ -328,7 +347,8 @@ def solve(
 
     per_rule = {
         con.rule: (_scale_band(con).interval.lo, _scale_band(con).interval.hi)
-        for con in constraints if con.b == 0.0 and con.c == 0.0 and con.a != 0.0
+        for con in constraints
+        if con.b == 0.0 and con.c == 0.0 and con.a != 0.0 and not con.preference
     }
 
     feasible = (
@@ -375,9 +395,12 @@ def solve(
     u, v = placed(s)
 
     slacks = {c.rule: c.slack(s, u, v) for c in constraints}
+    requirements = [c for c in softs if not c.preference]
     return Solution(
         scale=s, crop_x=v / s, crop_y=u / s,
         output_width=output_width, output_height=output_height,
-        min_slack=min((slacks[c.rule] for c in softs), default=0.0),
+        # Reported over published rules only. A preference's slack may be negative when the
+        # rules left no room for it; that is information, not a failure.
+        min_slack=min((slacks[c.rule] for c in requirements), default=0.0),
         slacks=slacks,
     )

@@ -228,3 +228,52 @@ class TestReviewPassOne:
         result = solve(constraints, 400, 500)
         assert isinstance(result, Infeasible)
         assert result.reason == "source_too_small"
+
+
+class TestReviewPassTwo:
+    """Pass two of independent review. All local; the branch merges after these and stops."""
+
+    def test_a_preference_cannot_make_a_compliant_crop_infeasible(self):
+        """The eye-centring band is this tool's composition preference, not a published rule.
+        Here the rules admit exactly one crop and it puts the eyes off-centre; the preference
+        must yield, not veto."""
+        constraints = [
+            Constraint(rule="head_height", a=1000.0, lo=500.0, hi=500.0),
+            Constraint(rule="crown_gap", a=100.0, b=-1.0, lo=10.0, hi=10.0),
+            Constraint(rule="eye_x_fixed", a=100.0, c=-1.0, lo=20.0, hi=20.0),
+            Constraint(rule="eye_centred", a=100.0, c=-1.0, lo=180.0, hi=220.0, preference=True),
+            *containment(4000, 6000, 400, 500),
+        ]
+        result = solve(constraints, 400, 500)
+        assert isinstance(result, Solution)
+        assert result.slacks["eye_centred"] < 0  # honoured as information, not enforced
+        assert result.min_slack >= 0  # reported over published rules only
+
+    def test_a_mixed_rule_and_source_collision_is_a_source_problem(self):
+        """crown_gap needs the crop to start high; the source's bottom edge needs it to start
+        low. That is framing, not a conflict between two published rules."""
+        constraints = [
+            Constraint(rule="head_height", a=1000.0, lo=500.0, hi=500.0),
+            Constraint(rule="crown_gap", a=2000.0, b=-1.0, lo=10.0, hi=20.0),
+            *containment(4000, 1400, 400, 500),
+        ]
+        result = solve(constraints, 400, 500)
+        assert isinstance(result, Infeasible)
+        assert result.reason == "source_too_small"
+        assert any("source_" in tag for pair in result.conflicting_rules for tag in pair)
+
+    def test_unbounded_scale_bands_serialize_as_valid_json(self):
+        import json
+
+        # one_sided demands s >= 0.5; head_width demands s in [0.1, 0.2]: empty. (A first
+        # version of this test used [0.9, 0.95], which satisfies s >= 0.5 - the solver was right.)
+        constraints = [
+            Constraint(rule="one_sided", a=1000.0, lo=500.0),
+            Constraint(rule="head_width", a=1000.0, lo=100.0, hi=200.0),
+            *containment(4000, 6000, 400, 500),
+        ]
+        result = solve(constraints, 400, 500)
+        assert isinstance(result, Infeasible)
+        text = json.dumps(result.to_dict())  # would raise or emit Infinity otherwise
+        assert "Infinity" not in text
+        assert result.to_dict()["scale_bands"]["one_sided"][1] is None

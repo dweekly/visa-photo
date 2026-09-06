@@ -304,11 +304,12 @@ def build_constraints(
             unapplied.append(f"{rule.key}: no handler in this build")
 
     # Horizontal placement. No source surveyed states a numeric band, so this is a tool
-    # preference rather than anyone's law: keep the eye midpoint within the middle tenth.
+    # PREFERENCE rather than anyone's law: keep the eye midpoint within the middle tenth
+    # where the rules leave room, and never let it make a compliant crop infeasible.
     if eye_x is not None:
         constraints.append(Constraint(
             "eye_centred", a=eye_x, c=-1.0,
-            lo=0.45 * size.width, hi=0.55 * size.width,
+            lo=0.45 * size.width, hi=0.55 * size.width, preference=True,
         ))
     else:
         unapplied.append("eye_centred: eye_mid_x is unavailable")
