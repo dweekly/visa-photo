@@ -74,6 +74,28 @@ def _pixels_only(image):
     return Image.frombytes("RGB", rgb.size, rgb.tobytes())
 
 
+class _Staged:
+    """A temporary file beside `out`. `commit()` moves it into place; `discard()` removes it.
+    Whatever is at `out` is untouched until a commit, so a failed write cannot destroy it."""
+
+    def __init__(self, out: Path):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(dir=out.parent, prefix=out.name + ".", suffix=".part")
+        os.close(fd)
+        self.out = out
+        self.path: Path | None = Path(name)
+
+    def commit(self) -> None:
+        assert self.path is not None
+        os.replace(self.path, self.out)
+        self.path = None
+
+    def discard(self) -> None:
+        if self.path is not None:
+            self.path.unlink(missing_ok=True)
+            self.path = None
+
+
 def encode(image, encoding: Encoding, out: Path) -> EncodeResult:
     """Write `image` to `out` at the highest listed quality whose written size fits the band.
 
@@ -93,23 +115,19 @@ def encode(image, encoding: Encoding, out: Path) -> EncodeResult:
     raw_bytes = image.size[0] * image.size[1] * 3
     default_maxblock = ImageFile.MAXBLOCK
     ImageFile.MAXBLOCK = max(default_maxblock, raw_bytes * ENCODER_BUFFER_RAW_MULTIPLE)
-    tmp: Path | None = None
+    staged: _Staged | None = None
     try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(dir=out.parent, prefix=out.name + ".", suffix=".part")
-        os.close(fd)
-        tmp = Path(name)
+        staged = _Staged(out)
         for quality in JPEG_QUALITIES:
             # Write, then measure the file on disk: the number that matters is the one the
             # applicant's upload form will see, after every byte the encoder emits.
-            image.save(tmp, format="JPEG", quality=quality,
+            image.save(staged.path, format="JPEG", quality=quality,
                        subsampling=_SUBSAMPLING[encoding.subsampling], optimize=True)
-            size = tmp.stat().st_size
+            size = staged.path.stat().st_size
             fits = _within(size, encoding)
             trace.append({"quality": quality, "bytes": size, "fits": fits})
             if fits:
-                os.replace(tmp, out)
-                tmp = None
+                staged.commit()
                 return EncodeResult("done", out, quality, size, trace,
                                     f"quality {quality}, {size} bytes")
             if encoding.min_bytes is not None and size < encoding.min_bytes:
@@ -119,8 +137,8 @@ def encode(image, encoding: Encoding, out: Path) -> EncodeResult:
                             f"could not write {out}: {e}")
     finally:
         ImageFile.MAXBLOCK = default_maxblock
-        if tmp is not None:
-            tmp.unlink(missing_ok=True)
+        if staged is not None:
+            staged.discard()
 
     band = f"{encoding.min_bytes or 0}-{encoding.max_bytes or 'inf'} bytes"
     return EncodeResult(
@@ -133,12 +151,21 @@ def write_unconstrained(image, out: Path) -> EncodeResult:
     """Write `image` for a profile that states no digital encoding rules (a print profile):
     format from the extension, Pillow's defaults, pixels only. The result says so."""
     out = Path(out)
+    fmt = Image.registered_extensions().get(out.suffix.lower())
+    if fmt is None:
+        return EncodeResult("write_failed", None, None, None, [],
+                            f"could not write {out}: no image format for extension {out.suffix!r}")
+    staged: _Staged | None = None
     try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        _pixels_only(image).save(out)
-        size = out.stat().st_size
-    except (OSError, ValueError) as e:  # ValueError: Pillow knows no format for the extension
+        staged = _Staged(out)
+        _pixels_only(image).save(staged.path, format=fmt)
+        size = staged.path.stat().st_size
+        staged.commit()
+    except OSError as e:
         return EncodeResult("write_failed", None, None, None, [], f"could not write {out}: {e}")
+    finally:
+        if staged is not None:
+            staged.discard()
     return EncodeResult("done", out, None, size, [],
                         f"{size} bytes; this profile states no digital encoding rules, so the "
                         "format follows the extension with Pillow's defaults")

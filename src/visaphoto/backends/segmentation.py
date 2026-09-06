@@ -124,6 +124,20 @@ def face_component(solid, eye_xy: tuple[float, float] | None):
     return labels == label, True, f"component {label} of {count} selected under the eyes"
 
 
+def subject_alpha(alpha, component):
+    """The matte restricted to the subject: `alpha` wherever a nonzero-alpha region touches the
+    selected solid `component`, zero everywhere else. A soft edge attached to the subject
+    survives; a detached fragment - solid or faint - does not. This is the only alpha rendering
+    is given, so a fragment the isolation gate rejected cannot be composited by accident."""
+    import numpy as np
+    from scipy import ndimage  # present whenever `component` exists: face_component needed it
+
+    labels, _ = ndimage.label(alpha > 0)
+    keep = np.unique(labels[component])
+    keep = keep[keep != 0]
+    return np.where(np.isin(labels, keep), alpha, 0).astype(alpha.dtype)
+
+
 def top_row(solid) -> int | None:
     """Topmost row with at least MIN_ROW_PIXELS solid pixels, or None if there is none."""
     import numpy as np

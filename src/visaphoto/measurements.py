@@ -201,9 +201,10 @@ class MeasurementSet:
     """Backend name -> version, recorded so a report is reproducible."""
     gate_record: Any = None
     """The frozen `gates.GateRecord` this set was built from, for the report."""
-    matte_alpha: Any = None
-    """The person matte (uint8 H x W) when segmentation ran, for rendering. Never a
-    measurement in itself; rendering consults the gate record before using it."""
+    subject_alpha: Any = None
+    """The person matte (uint8 H x W) restricted to the component the `face_component_isolated`
+    gate selected, with its attached soft edge; present only when that gate is True. Rendering
+    composites this and nothing else - the raw matte never reaches it."""
     _measurements: dict[str, Measurement] = field(default_factory=dict, repr=False)
 
     def add(self, measurement: Measurement) -> None:

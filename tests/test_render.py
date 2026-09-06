@@ -9,7 +9,8 @@ from dataclasses import replace
 import numpy as np
 from PIL import Image, JpegImagePlugin
 
-from tests.test_regressions import landmarks, matte, pixels, run
+from tests.test_regressions import H, W, landmarks, matte, pixels, run
+from visaphoto.backends.segmentation import MatteFit
 from visaphoto.encode import JPEG_QUALITIES, encode, write_unconstrained
 from visaphoto.plan import make_plan
 from visaphoto.profiles import CN_VISA_DIGITAL, CN_VISA_PAPER, Encoding
@@ -222,6 +223,39 @@ class TestReplaceBackground:
         assert rec.status == "refused"
         assert any(g == "face_component_isolated" and s is False for g, s, _ in rec.gates)
 
+    def test_a_detached_matte_fragment_is_not_composited(self):
+        """A solid 30x30 fragment far from the body. The isolation gate selects the body under
+        the eyes; what is composited must be that selection, so the fragment's pixels become
+        background in the output instead of surviving as a grey patch."""
+        fragment = [(r, c) for r in range(100, 130) for c in range(70, 100)]
+        m = measured(m=matte(extra=fragment))
+        gate = m.gate_record["face_component_isolated"]
+        assert gate.satisfied is True and "of 2 selected" in gate.detail
+        assert m.subject_alpha[115, 85] == 0 and m.subject_alpha[400, 300] == 255
+        plan = make_plan(ALLOWING, m)
+        out = render(image_for(m), m, plan, ALLOWING)
+        assert op(out, "replace_background").status == "done"
+        box = op(out, "crop_resize").params["box"]
+        s = op(out, "crop_resize").params["scale"]
+        x, y = int((85 - box[0]) * s), int((115 - box[1]) * s)
+        assert 0 <= x < 354 and 0 <= y < 472, "the fragment must land inside the crop for this to test anything"
+        assert out.image.getpixel((x, y)) == (255, 255, 255)
+
+    def test_the_subjects_soft_edge_survives_isolation_and_a_faint_fragment_does_not(self):
+        alpha = np.zeros((H, W), dtype=np.uint8)
+        alpha[100:700, 150:450] = 255
+        alpha[99, 150:450] = alpha[700, 150:450] = 100      # a soft edge attached to the body
+        alpha[100:130, 70:100] = 100                          # a faint, detached fragment
+        m = measured(m=MatteFit(True, True, alpha, "test"))
+        assert m.gate_record["face_component_isolated"].satisfied is True
+        assert m.subject_alpha[99, 300] == 100 and m.subject_alpha[700, 300] == 100
+        assert m.subject_alpha[115, 85] == 0
+
+    def test_no_subject_alpha_when_isolation_failed(self):
+        m = measured(m=matte(top=600))
+        assert m.gate_record["face_component_isolated"].satisfied is False
+        assert m.subject_alpha is None
+
     def test_refused_when_the_subject_crosses_the_crop_top(self):
         """The head runs to the crop's top edge: compositing would leave a hard edge across it.
         The crop still renders; only the replacement is refused."""
@@ -327,7 +361,26 @@ class TestEncode:
         with Image.open(result.path) as im:
             assert im.format == "PNG" and im.size == (354, 472)
         bad = write_unconstrained(textured(354, 472), tmp_path / "print.unknownext")
-        assert bad.status == "write_failed"
+        assert bad.status == "write_failed" and "no image format" in bad.detail
+        assert not list(tmp_path.glob("*.part"))
+
+    def test_a_failed_print_write_leaves_the_existing_file_untouched(self, tmp_path, monkeypatch):
+        """The writer dies mid-file (a full disk); what was at --out must still be there."""
+        import errno
+
+        out = tmp_path / "print.png"
+        out.write_bytes(b"the previous output")
+
+        def dies(self, fp, *a, **k):
+            with open(fp, "wb") as f:
+                f.write(b"\x89PNG")
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr(Image.Image, "save", dies)
+        result = write_unconstrained(textured(354, 472), out)
+        assert result.status == "write_failed" and "No space left" in result.detail
+        assert out.read_bytes() == b"the previous output"
+        assert not list(tmp_path.glob("*.part"))
 
     def test_unsupported_format_is_refused_not_guessed(self, tmp_path):
         enc = Encoding(format="png", colour="srgb_24bit", min_bytes=None, max_bytes=None, quote="q")

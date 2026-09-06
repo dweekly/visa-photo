@@ -355,8 +355,14 @@ def measure_all(pixels, lm: LandmarkFit, matte: seg.MatteFit, *, source: str,
     record = G.evaluate(source, _evaluators(raw, segmentation_attempted))
     candidates = _candidates(raw)
 
+    # Rendering gets the subject the isolation gate selected, or nothing. The raw matte,
+    # fragments included, stops here.
+    component = raw.component()[0]
+    subject = None
+    if record["face_component_isolated"].satisfied is True and component is not None:
+        subject = seg.subject_alpha(matte.alpha, component)
     result = MeasurementSet(source=source, image_width=raw.width, image_height=raw.height,
-                            gate_record=record, matte_alpha=matte.alpha)
+                            gate_record=record, subject_alpha=subject)
     result.backends["mediapipe"] = lm.version
     if matte.version:
         result.backends["rembg"] = matte.version

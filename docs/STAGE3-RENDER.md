@@ -23,7 +23,7 @@ because its inputs happened to be present.
 | Operation | Requires |
 |---|---|
 | `crop_resize` | a feasible `Plan`; profile policy for `crop` and `resize` is `allowed` |
-| `replace_background` | policy `allowed` (never `unresolved`, see below); `matte_present`; `face_component_isolated`; the matte's alpha at the crop's border rows/columns is background (no subject touches the crop edge) |
+| `replace_background` | policy `allowed` (never `unresolved`, see below); `matte_present`; `face_component_isolated`; the isolated subject — the component that gate selected, with its attached soft edge, the only alpha rendering is given — is clear of the crop's top and side edges |
 | `encode` | `crop_resize` done; a candidate satisfying the profile's format, colour space and byte band exists |
 
 **`unresolved` is treated as prohibited by default.** China's sheet says nothing about editing,

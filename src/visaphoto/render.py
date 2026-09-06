@@ -69,8 +69,8 @@ def _crop_box(plan: Plan) -> tuple[float, float, float, float]:
 
 
 def _subject_clear_of_crop_top_and_sides(alpha, box, solid_threshold: int) -> tuple[bool, str]:
-    """The matte must not cross the crop's top or side edges. The bottom is exempt: a
-    head-and-shoulders crop necessarily cuts through the torso."""
+    """The isolated subject must not cross the crop's top or side edges. The bottom is exempt:
+    a head-and-shoulders crop necessarily cuts through the torso."""
     import numpy as np
 
     x0, y0, x1, y1 = (int(round(v)) for v in box)
@@ -163,21 +163,27 @@ def render(
             "replace_background", "refused",
             "the matte did not establish the face's region; a background cannot be replaced "
             "from it", bg_gates, opt_in=policy == "unresolved"))
+    elif measurements.subject_alpha is None:
+        history.append(OperationRecord(
+            "replace_background", "refused",
+            "the isolation gate passed but no isolated subject alpha was carried; this is an "
+            "internal inconsistency, so nothing is composited", bg_gates,
+            opt_in=policy == "unresolved"))
     else:
         clear, why = _subject_clear_of_crop_top_and_sides(
-            measurements.matte_alpha, _crop_box(plan), ALPHA_SOLID)
+            measurements.subject_alpha, _crop_box(plan), ALPHA_SOLID)
         edge_gate = ("subject_clear_of_crop_top_and_sides", clear, why)
         if not clear:
             history.append(OperationRecord(
                 "replace_background", "refused", why, (*bg_gates, edge_gate),
                 opt_in=policy == "unresolved"))
         else:
-            matte = Image.fromarray(measurements.matte_alpha, "L")
+            subject = Image.fromarray(measurements.subject_alpha, "L")
             backdrop = Image.new("RGB", source.size, WHITE)
-            source = Image.composite(source, backdrop, matte)
+            source = Image.composite(source, backdrop, subject)
             history.append(OperationRecord(
                 "replace_background", "done",
-                "composited the person matte over white in source space",
+                "composited the isolated subject over white in source space",
                 (*bg_gates, edge_gate), {"background": "#ffffff"},
                 opt_in=policy == "unresolved"))
 
