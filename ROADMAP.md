@@ -28,11 +28,12 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   box; a bounded JPEG quality search on written bytes with staged writes; `--out`, the
   operation history, exit 5. Scope and what was left out in
   [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md). Two review passes and a receipt.
-- **Stage 4 — validator and report contract.** In progress on PR #6. Per-criterion pass /
-  fail / indeterminate / not-evaluated from the written file's own measurements, with the
-  plan's prediction and the delta beside each; `--validate` for a file you already have; both
-  readings of KB; strict bounds; a report envelope with a version. Plan in
-  [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md).
+- ~~**Stage 4 — validator and report contract.**~~ Merged 2026-09-06 (PR #6). The written file
+  is reopened and checked rule by rule from its own measurements, with the plan's prediction and
+  the delta beside each; `--validate` for a file you already have; encoding checked from the file
+  under both readings of KB; strict bounds; `--spec` selects the destination's advisories; one
+  report envelope with a version. Plan and scope in
+  [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md). Three review passes, a decision, a receipt.
 - **Solver objective when a preference is unsatisfiable** (Stage 2 follow-up). The centring
   preference's slack takes part in the min-slack objective; when the preference cannot be met
   its negative slack dominates the minimum at every crop, and the search no longer sees the
