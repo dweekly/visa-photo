@@ -36,13 +36,17 @@ class Rule:
 
     lo: float | None = None
     hi: float | None = None
+    lo_strict: bool = False
+    """True when the source says "greater than", not "at least": a value equal to `lo` fails."""
+    hi_strict: bool = False
     unit: str = "px"
     note: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key, "quote": self.quote, "measurement": self.measurement,
-            "lo": self.lo, "hi": self.hi, "unit": self.unit, "note": self.note,
+            "lo": self.lo, "hi": self.hi, "lo_strict": self.lo_strict, "hi_strict": self.hi_strict,
+            "unit": self.unit, "note": self.note,
         }
 
 
@@ -57,28 +61,57 @@ class OutputSize:
 
 
 @dataclass(frozen=True)
+class SizeReading:
+    """One reading of a published file-size band. "40 KB - 120 KB" has two: a kilobyte of 1,000
+    bytes and one of 1,024. A validator reports each; the encoder targets their intersection."""
+
+    name: str
+    min_bytes: int | None
+    max_bytes: int | None
+
+    def contains(self, size: int) -> bool:
+        return ((self.min_bytes is None or size >= self.min_bytes)
+                and (self.max_bytes is None or size <= self.max_bytes))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "min_bytes": self.min_bytes, "max_bytes": self.max_bytes}
+
+
+@dataclass(frozen=True)
 class Encoding:
     """A channel's published file rules, as quoted, beside this tool's reading of them.
 
-    `quote` is the source's wording. `min_bytes` / `max_bytes` / `colour` / `subsampling` are
-    the interpretation the encoder enforces, and `interpretation` says how the numbers were read
-    and which choices are the tool's own. Absent on a print profile.
+    `quote` is the source's wording. `size_readings` are the readings of its size band;
+    `min_bytes` / `max_bytes` are their intersection, which is what the encoder targets so a
+    file inside it satisfies every reading. `colour` and `subsampling` are the encoder's
+    choices, and `interpretation` says which is which. Absent on a print profile.
     """
 
     format: str
     """`jpeg` is the only format this build writes."""
     colour: str
     """`srgb_24bit`: 8 bits per channel RGB, sRGB primaries, written without a profile."""
-    min_bytes: int | None
-    max_bytes: int | None
     quote: str
     interpretation: str
+    size_readings: tuple[SizeReading, ...] = ()
     subsampling: str = "4:4:4"
+
+    @property
+    def min_bytes(self) -> int | None:
+        mins = [r.min_bytes for r in self.size_readings if r.min_bytes is not None]
+        return max(mins) if mins else None
+
+    @property
+    def max_bytes(self) -> int | None:
+        maxes = [r.max_bytes for r in self.size_readings if r.max_bytes is not None]
+        return min(maxes) if maxes else None
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "format": self.format, "colour": self.colour, "min_bytes": self.min_bytes,
-            "max_bytes": self.max_bytes, "subsampling": self.subsampling, "quote": self.quote,
+            "format": self.format, "colour": self.colour,
+            "size_readings": [r.to_dict() for r in self.size_readings],
+            "min_bytes": self.min_bytes, "max_bytes": self.max_bytes,
+            "subsampling": self.subsampling, "quote": self.quote,
             "interpretation": self.interpretation,
         }
 
@@ -90,8 +123,12 @@ class Profile:
     channel: str
     source: str
     retrieved: str
+    jurisdiction: str
+    """The requirements.py jurisdiction code whose advisories apply alongside these rules."""
     sizes: tuple[OutputSize, ...]
     rules: tuple[Rule, ...]
+    sizes_quote: str = ""
+    """The source's wording for the permitted dimensions."""
     physical_mm: tuple[float, float] | None = None
     """Printed size, when the rules are stated in millimetres. Bounds in mm are converted to
     output pixels through this and the output size before any constraint is built - a pixel
@@ -111,7 +148,9 @@ class Profile:
         return {
             "key": self.key, "destination": self.destination, "channel": self.channel,
             "source": self.source, "retrieved": self.retrieved,
+            "jurisdiction": self.jurisdiction,
             "sizes": [{"width": s.width, "height": s.height} for s in self.sizes],
+            "sizes_quote": self.sizes_quote,
             "reference_size": (
                 {"width": self.reference_size.width, "height": self.reference_size.height}
                 if self.reference_size else None
@@ -128,11 +167,14 @@ class Profile:
 # bound. Both exist only in the paper profile, in millimetres. Their absence is the point.
 CN_VISA_DIGITAL = Profile(
     key="cn_visa_digital",
+    jurisdiction="CN",
     destination="China",
     channel="online visa application (digital photo)",
     source=CN_SHEET,
     retrieved="2026-09-04",
     sizes=(OutputSize(354, 472), OutputSize(420, 560)),
+    sizes_quote="The digital photo should be between 354 pixels (width) x 472 pixels (height) "
+                "and 420 pixels (width) x 560 pixels (height).",
     reference_size=OutputSize(354, 472),
     rules=(
         Rule(
@@ -167,13 +209,15 @@ CN_VISA_DIGITAL = Profile(
                 "line through the centre of the eyes should be > 256 pixels."
             ),
             measurement="eye_line_y",
-            lo=256.0,
+            lo=256.0, lo_strict=True,
+            note="The text says > 256; the diagram is labelled \u2265 256. The text's reading, the "
+                 "stricter, is applied; a value of exactly 256 fails.",
         ),
         Rule(
             key="inter_eye_distance",
             quote="The inter-eye distance should be > 60 pixels.",
             measurement="inter_eye_distance",
-            lo=60.0,
+            lo=60.0, lo_strict=True,
         ),
     ),
     operations={
@@ -182,13 +226,17 @@ CN_VISA_DIGITAL = Profile(
         "adjust_colour": "unresolved", "synthesize_pixels": "prohibited",
     },
     encoding=Encoding(
-        format="jpeg", colour="srgb_24bit", min_bytes=40 * 1024, max_bytes=120 * 1000,
+        format="jpeg", colour="srgb_24bit",
         quote="Colour Space: RGB 24bit true colour. Image Compression: JPEG and the image "
               "file size: 40 KB - 120 KB.",
-        interpretation="'40 KB - 120 KB' is read as 40,960-120,000 bytes: the intersection of "
-                       "the 1,000- and 1,024-byte readings of KB, so a file inside it satisfies "
-                       "either. The sheet states 24-bit RGB; sRGB as the RGB space, and 4:4:4 "
-                       "chroma, are this tool's choices.",
+        interpretation="The sheet does not say which kilobyte it means, so both readings are "
+                       "kept: the encoder targets their intersection (40,960-120,000 bytes) "
+                       "and the validator reports each. The sheet states 24-bit RGB; sRGB as "
+                       "the RGB space, and 4:4:4 chroma, are this tool's choices.",
+        size_readings=(
+            SizeReading("KB = 1,000 bytes", 40_000, 120_000),
+            SizeReading("KB = 1,024 bytes", 40_960, 122_880),
+        ),
     ),
     notes=(
         "This channel states NO head-height bound. Do not import one from the paper profile.",
@@ -199,6 +247,7 @@ CN_VISA_DIGITAL = Profile(
 
 CN_VISA_PAPER = Profile(
     key="cn_visa_paper",
+    jurisdiction="CN",
     destination="China",
     channel="paper photo for the visa application form",
     source=CN_SHEET,
@@ -311,36 +360,42 @@ def build_constraints(
             if head_width is None:
                 unapplied.append(f"{rule.key}: head_width_silhouette is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=head_width, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
+            constraints.append(Constraint(rule.key, a=head_width, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi),
+                                       lo_strict=rule.lo_strict, hi_strict=rule.hi_strict))
         elif rule.key == "crown_gap":
             if crown is None:
                 unapplied.append(f"{rule.key}: matte_top_row is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=crown, b=-1.0, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
+            constraints.append(Constraint(rule.key, a=crown, b=-1.0, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi),
+                                       lo_strict=rule.lo_strict, hi_strict=rule.hi_strict))
         elif rule.key == "eye_line_from_bottom":
             if eye_line is None:
                 unapplied.append(f"{rule.key}: eye_line_y is unavailable")
                 continue
             constraints.append(Constraint(
-                rule.key, a=-eye_line, b=1.0, k=float(size.height), lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)
+                rule.key, a=-eye_line, b=1.0, k=float(size.height), lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi),
+                lo_strict=rule.lo_strict, hi_strict=rule.hi_strict,
             ))
         elif rule.key == "head_height":
             if crown is None or chin is None:
                 unapplied.append(f"{rule.key}: matte_top_row or chin_landmark_y is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=chin - crown, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
+            constraints.append(Constraint(rule.key, a=chin - crown, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi),
+                                       lo_strict=rule.lo_strict, hi_strict=rule.hi_strict))
         elif rule.key == "chin_to_bottom":
             if chin is None:
                 unapplied.append(f"{rule.key}: chin_landmark_y is unavailable")
                 continue
             constraints.append(Constraint(
-                rule.key, a=-chin, b=1.0, k=float(size.height), lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)
+                rule.key, a=-chin, b=1.0, k=float(size.height), lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi),
+                lo_strict=rule.lo_strict, hi_strict=rule.hi_strict,
             ))
         elif rule.key == "inter_eye_distance":
             if ied is None:
                 unapplied.append(f"{rule.key}: inter_eye_distance is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=ied, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
+            constraints.append(Constraint(rule.key, a=ied, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi),
+                                       lo_strict=rule.lo_strict, hi_strict=rule.hi_strict))
         else:  # pragma: no cover - guards against a rule added without a handler
             unapplied.append(f"{rule.key}: no handler in this build")
 

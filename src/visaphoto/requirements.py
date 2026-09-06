@@ -191,6 +191,19 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         check=Check.USER_ATTESTATION,
     ),
     Requirement(
+        key="photo_quality_cn",
+        jurisdictions=("CN",),
+        quote=(
+            "The photo should have no damage or impurities, no background light or shadow over "
+            "face. There should not be over- or under-exposure. The face should be centered in "
+            "the photo with all the features clearly visible and natural skin tone."
+        ),
+        source=CN_SHEET,
+        check=Check.NOT_ASSESSABLE,
+        note="Sharpness, exposure, shadow and skin-tone checks each need calibration before a "
+             "threshold is defensible; none exists in this build. See ROADMAP.md.",
+    ),
+    Requirement(
         key="background_cn",
         jurisdictions=("CN",),
         quote=(

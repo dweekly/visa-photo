@@ -28,11 +28,19 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   box; a bounded JPEG quality search on written bytes with staged writes; `--out`, the
   operation history, exit 5. Scope and what was left out in
   [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md). Two review passes and a receipt.
-- **Stage 4 — validator and report contract.** Per-criterion pass / fail / indeterminate /
-  not-evaluated, each with a reason, measured from the written file. Re-fitting after colour
-  conversion, downsampling and JPEG encoding moves landmarks and matte edges; record predicted
-  versus observed positions and their deltas, and keep geometric feasibility distinct from
-  compliance of the written file.
+- **Stage 4 — validator and report contract.** In progress on PR #6. Per-criterion pass /
+  fail / indeterminate / not-evaluated from the written file's own measurements, with the
+  plan's prediction and the delta beside each; `--validate` for a file you already have; both
+  readings of KB; strict bounds; a report envelope with a version. Plan in
+  [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md).
+- **Solver objective when a preference is unsatisfiable** (Stage 2 follow-up). The centring
+  preference's slack takes part in the min-slack objective; when the preference cannot be met
+  its negative slack dominates the minimum at every crop, and the search no longer sees the
+  requirements' slack. Reproduction: `reference_measurements(head_width_silhouette=200,
+  inter_eye_distance=100, matte_top_row=1000, eye_line_y=1200, chin_landmark_y=1400,
+  eye_mid_x=150)` under `cn_visa_digital` chooses scale 1.03 with crown gap 10 and eye line
+  256 (min slack 0) while scale 1.02 gives eye line 258. Fix direction: maximize the
+  requirements' slack first; use preferences only to choose among crops that tie.
 - **Stage 5 — seeded profiles and docs.** `cn_visa_digital`, `cn_visa_paper`, `us_visa_digital`,
   `us_passport_print`, `schengen_icao_base`, `nz_nzeta`.
 
@@ -57,6 +65,22 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   one that does not, permission joins the plan or becomes an explicit execution gate.
 - **Non-RGB sources.** CMYK and grey-profiled sources take the same colour path as RGB and are
   not claimed; a portable ICC fixture is needed before they are.
+
+## Deferred from Stage 4
+
+- **Accuracy of the self-consistency interval.** Stage 4 reports the delta between the plan's
+  prediction and the output's measurement as an interval with no confidence attached. Whether
+  such intervals cover the true error at all is a calibration question: source/output scale
+  pairs with annotated landmarks and matte edges, and correlated model error at two scales.
+- **Image-quality checks.** Background colour, borders, sharpness, exposure, natural skin tone —
+  all required by China, none checkable here without calibration. Alongside the existing gaps:
+  glasses frames, gaze.
+- **Captured detail.** Output pixel IED cannot establish the facial detail captured; a
+  standalone file cannot reconstruct its history. A calibrated detail assessment, and the
+  provenance the report already preserves (source measurements, render scale) as its inputs.
+- **Recovery after an unsatisfactory validation.** Recropping, a joint geometry/encoding
+  search, alternate backends, transactional publication of a validated file. Today a written
+  file stays on disk whatever its validation says; the report is the record.
 
 ## Adoption: distribution and the Claude skill
 

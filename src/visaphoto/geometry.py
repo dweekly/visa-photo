@@ -90,6 +90,14 @@ class Constraint:
     k: float = 0.0
     lo: float | None = None
     hi: float | None = None
+    lo_strict: bool = False
+    """The source says "greater than": a value equal to `lo` violates the rule. The solver
+    treats the interval as closed and maximizes slack; the validator is what fails a value on
+    the bound (validate.py). The solver does not refuse such a point itself: its optimum can
+    land on a bound while crops with slack exist, when a preference is unsatisfiable (see
+    ROADMAP, "Solver objective when a preference is unsatisfiable"), and a refusal there would
+    be false."""
+    hi_strict: bool = False
     hard: bool = False
     """Hard constraints must hold but earn no slack reward - source containment, for instance.
     Without this a crop drifts toward the middle of the photograph for no reason."""

@@ -139,9 +139,42 @@ def op(result, name):
     return next(h for h in result.history if h.name == name)
 
 
-def stub_fits(monkeypatch, lm=None, m=None):
-    monkeypatch.setattr(measure.landmarks, "fit", lambda image, model_path: lm or landmarks())
-    monkeypatch.setattr(measure.segmentation, "fit", lambda image: m or matte())
+def output_fits(plan, dx=0.0, dy=0.0):
+    """The source fixture's landmarks and matte as the plan's crop would show them in the
+    output: every point moved by (p - origin) * scale. `dx`, `dy` shift the landmarks so the
+    output disagrees with the plan's prediction by a known amount."""
+    from visaphoto.backends.segmentation import MatteFit
+
+    o = plan.chosen.outcome
+    s, ox, oy = o.scale, o.crop_x, o.crop_y
+    w, h = plan.chosen.size.width, plan.chosen.size.height
+    t = lambda p: ((p[0] - ox) * s + dx, (p[1] - oy) * s + dy)  # noqa: E731
+    lm = landmarks(left=t((200.0, 300.0)), right=t((400.0, 300.0)), chin=t((300.0, 520.0)),
+                   oval_left=t((150.0, 350.0)), oval_right=t((450.0, 350.0)))
+    alpha = np.zeros((h, w), dtype=np.uint8)
+    top, bottom = int(round((100 - oy) * s)), int(round((700 - oy) * s))
+    left, right = int(round((150 - ox) * s)), int(round((450 - ox) * s))
+    alpha[max(top, 0):min(bottom, h), max(left, 0):min(right, w)] = 255
+    return lm, MatteFit(True, True, alpha, "test")
+
+
+def stub_fits(monkeypatch, lm=None, m=None, output=None):
+    """Serve the 600x800 source fixture's fits to the source image and, to any other size, the
+    plan-transformed fits (or `output`, a (landmarks, matte) pair) - so a written file gets
+    fits that belong to it, not the source's."""
+    src_lm, src_m = lm or landmarks(), m or matte()
+    out_lm = out_m = None
+
+    def fits_for(image):
+        nonlocal out_lm, out_m
+        if image.size == (600, 800):
+            return src_lm, src_m
+        if out_lm is None:
+            out_lm, out_m = output if output is not None else output_fits(feasible_plan())
+        return out_lm, out_m
+
+    monkeypatch.setattr(measure.landmarks, "fit", lambda image, model_path: fits_for(image)[0])
+    monkeypatch.setattr(measure.segmentation, "fit", lambda image: fits_for(image)[1])
 
 
 # --- the loader ----------------------------------------------------------------------------------
@@ -308,8 +341,8 @@ class TestEncode:
         assert b"private" not in (tmp_path / "out.jpg").read_bytes()
 
     def test_unsupported_rules_are_refused_not_guessed(self, tmp_path):
-        for enc in (Encoding("png", "srgb_24bit", None, None, "q", "i"),
-                    Encoding("jpeg", "cmyk", None, None, "q", "i")):
+        for enc in (Encoding(format="png", colour="srgb_24bit", quote="q", interpretation="i"),
+                    Encoding(format="jpeg", colour="cmyk", quote="q", interpretation="i")):
             result = encode(Image.new("RGB", (10, 10)), enc, tmp_path / "x.jpg")
             assert result.status == "no_encoding_satisfies" and "not supported" in result.detail
 
@@ -340,8 +373,8 @@ class TestCli:
         code = cli.main([str(photo), "--spec", "cn_visa_digital", "--out", str(out),
                          "--model", str(photo), "--json"])
         report = json.loads(capsys.readouterr().out)
-        assert code == cli.EXIT_OK, (report["preflight"], report["encode"])
-        assert len(decodes) == 1
+        assert code == cli.EXIT_OK, (report["preflight"], report["encode"], report["validation"])
+        assert decodes == [photo, out]  # one decode per snapshot: the input, then the written file
         assert report["measurements"]["image"] == {"width": 600, "height": 800}  # orientation applied
         assert [h["operation"] for h in report["render"]["history"]] == ["colour_convert", "crop_resize"]
         assert report["render"]["history"][0]["status"] == "done"
