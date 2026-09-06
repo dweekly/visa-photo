@@ -1,8 +1,10 @@
 # Python
 __pycache__/
 *.py[cod]
-.venv/
-.venv*/
+# No trailing slash: a trailing slash matches only directories, and a .venv SYMLINK to another
+# worktree's venv was once committed because of exactly that.
+.venv
+.venv*
 *.egg-info/
 build/
 dist/
