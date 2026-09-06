@@ -382,6 +382,18 @@ class TestCli:
         code = cli.main([str(photo), "--spec", "cn_visa_digital", "--out", str(tmp_path / "p.jpg")])
         assert code == cli.EXIT_USAGE and photo.read_bytes() == before
 
+    def test_out_that_is_the_input_by_another_name_is_refused(self, tmp_path):
+        """A hard link: a different path, the same file. On macOS a case variant of the name
+        does the same thing, and a resolved-path comparison misses both."""
+        import os
+
+        photo = write_photo(tmp_path / "p.jpg", flat())
+        before = photo.read_bytes()
+        alias = tmp_path / "alias.jpg"
+        os.link(photo, alias)
+        code = cli.main([str(photo), "--spec", "cn_visa_digital", "--out", str(alias)])
+        assert code == cli.EXIT_USAGE and photo.read_bytes() == before
+
     def test_out_with_no_photo_is_a_usage_error_not_a_traceback(self, tmp_path):
         with pytest.raises(SystemExit):
             cli.main(["--spec", "cn_visa_digital", "--out", str(tmp_path / "o.jpg")])

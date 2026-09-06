@@ -257,7 +257,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {args.spec} states no digital encoding rules; --out is not supported "
                   "for print profiles yet", file=sys.stderr)
             return EXIT_USAGE
-        if args.out.exists() and args.out.resolve() == args.photo.resolve():
+        # samefile, not path equality: on a case-insensitive filesystem PHOTO.jpg and photo.jpg
+        # resolve to different strings and the same file, as does a hard link anywhere.
+        if args.out.exists() and args.out.samefile(args.photo):
             print("error: --out is the input photo; the original is never overwritten",
                   file=sys.stderr)
             return EXIT_USAGE
