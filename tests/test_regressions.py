@@ -310,6 +310,21 @@ class TestReviewPassOne:
         glasses = next(f for f in report.findings if f.requirement.key == "glasses_cn")
         assert glasses.outcome is Outcome.WARN
 
+    def test_both_cheek_patches_off_frame_is_not_a_clean_glasses_result(self):
+        """Pass two. Irises at x=130 and x=470 in a 600-px frame put both cheek patches
+        outside the image while both eye patches stay inside: the glare signal is assessed and
+        the tint signal is not. The requirement names both, so a clean result is not claimed."""
+        from visaphoto.preflight import Outcome, run as preflight_run
+
+        r = run(lm=landmarks(left=(130.0, 300.0), right=(470.0, 300.0)))
+        for side in ("left", "right"):
+            assert r.status(f"patch_brightness_ratio:{side}") is Status.UNAVAILABLE
+            assert r.status(f"eye_specular_fraction:{side}") is Status.AVAILABLE
+        report = preflight_run(r, dict(NEUTRAL), jurisdiction="CN")
+        glasses = next(f for f in report.findings if f.requirement.key == "glasses_cn")
+        assert glasses.outcome is Outcome.NOT_EVALUATED
+        assert "eyes_obscured not assessed" in glasses.detail
+
     def test_json_output_keeps_the_cannot_measure_exit_code(self, monkeypatch, tmp_path, capsys):
         """`--json` emitted the report and then exited 0 (or 4 with --spec) on a photo with
         no face, so a script could not tell failed measurement from success."""

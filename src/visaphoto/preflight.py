@@ -223,28 +223,33 @@ def _assess(
         return Finding(requirement, Outcome.LIKELY_OK, detail, score=ied,
                        threshold=MIN_IED_PIXELS)
 
-    relevant = [flags[name] for name in requirement.signals if name in flags]
-    if not relevant:
+    present = [flags[name] for name in requirement.signals if name in flags]
+    absent = [name for name in requirement.signals if name not in flags]
+    if not present:
         return Finding(requirement, Outcome.NOT_EVALUATED,
                        "the model returned no scores for the signals this requirement needs")
     scope = f" [{requirement.note}]" if requirement.note.startswith(
         ("PARTIAL", "Derived. PARTIAL")
     ) else ""
-    fired = [f for f in relevant if f.raised]
+    fired = [f for f in present if f.raised]
     if fired:
         return Finding(requirement, Outcome.WARN,
                        "; ".join(f.detail for f in fired) + scope,
                        score=fired[0].score, threshold=fired[0].threshold)
-    # A warning from any assessed input stands. A clean result needs every input assessed:
-    # one eye off the frame and the other clear is not "eyes clear", it is half an answer.
-    incomplete = [f for f in relevant if not f.complete]
+    # A warning from any assessed input stands. A clean result needs every signal the
+    # requirement names, each fully assessed. A signal with no flag was never looked at - the
+    # measurement behind it was unavailable - and a signal assessed on one eye only is half an
+    # answer. Neither is "clear", and the requirement's own signal list, not the set of flags
+    # that happened to be produced, decides what counts as complete.
+    incomplete = [f.detail for f in present if not f.complete]
+    incomplete += [f"{name} not assessed" for name in absent]
     if incomplete:
         return Finding(requirement, Outcome.NOT_EVALUATED,
-                       "; ".join(f.detail for f in incomplete)
+                       "; ".join(incomplete)
                        + " - not every input could be assessed, so no clean result is claimed"
                        + scope)
     return Finding(requirement, Outcome.LIKELY_OK,
-                   "; ".join(f.detail for f in relevant) + scope)
+                   "; ".join(f.detail for f in present) + scope)
 
 
 def _assess_pose(requirement: Requirement, result: MeasurementSet) -> Finding:
