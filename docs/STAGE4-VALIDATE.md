@@ -156,8 +156,10 @@ derives `min_bytes` / `max_bytes` as their intersection for the encoder. `solve(
 - `predict(profile, plan, source_measurements)`: the same constraints at the plan's `(s, u, v)`.
 - `validate(profile, facts, measurements, preflight, predicted=None) -> Validation`.
 - The interval rule with strictness: with half-width `d` (0 when no prediction), `[x − d, x + d]`
-  inside ⇒ `pass`; disjoint ⇒ `fail`; touching or straddling ⇒ `indeterminate`; on an exclusive
-  bound, equality counts as outside.
+  inside the band ⇒ `pass`; disjoint from it ⇒ `fail`; otherwise `indeterminate`. An inclusive
+  endpoint belongs to the band, so an interval touching it is inside; an exclusive endpoint does
+  not, so an interval touching it is `indeterminate` and a value equal to it, with no interval,
+  is outside.
 
 **CLI**
 
@@ -190,9 +192,9 @@ and the written file through `--validate` giving the same verdicts.
 ## Sequence
 
 - [x] This document, reviewed once by Codex (GPT-6 Astra, high); ROADMAP entries.
-- [ ] Schema: strict bounds, `jurisdiction`, size readings; solver strict-point refusal.
-- [ ] `validate.py`: file facts, observe, predict, verdicts, aggregate.
-- [ ] CLI: `--validate`, post-write validation, exit table, report envelope; README report
+- [x] Schema: strict bounds, `jurisdiction`, size readings; solver strict-point refusal.
+- [x] `validate.py`: file facts, observe, predict, verdicts, aggregate.
+- [x] CLI: `--validate`, post-write validation, exit table, report envelope; README report
       section and status line.
-- [ ] Tests as above; real run.
+- [x] Tests as above; real run.
 - [ ] Review under the two-pass rule; merge.

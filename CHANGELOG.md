@@ -6,6 +6,21 @@ User-facing changes, newest first. Cited from [README.md](README.md).
 
 Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 
+### Added (unreleased, Stage 4)
+- After `--out`, the written file is reopened, measured afresh, and checked rule by rule from
+  its own measurements: `pass`, `fail`, `indeterminate` or `not_evaluated`, each with the
+  observed value, the plan's prediction, their delta and the reason. Encoding is checked from
+  the file: dimensions, format, 24-bit RGB, and the size in bytes under both readings of "KB".
+  The aggregate covers implemented checks only; what still needs the applicant's word and what
+  this build cannot assess are listed beside it. Exit 6 when the file fails.
+- `--validate` checks a photo you already have against `--spec`, at its own size, with no crop.
+- `--spec` now selects the destination's advisories (China's, for `cn_visa_digital`) without
+  `--for`; a conflicting `--for` is refused.
+- China's "> 60 pixels" and "> 256 pixels" are strict: a value exactly on the bound fails, and the
+  solver refuses a crop whose only feasible point sits on one.
+- `--json` emits one envelope for every photo run - `report_version`, `tool`, `error`, then each
+  stage, `null` when not reached - documented under "The report" in the README.
+
 ### Added (unreleased, Stage 3)
 - `--out FILE` renders the planned crop and writes it (requires `--spec` and a digital profile).
   The photo is decoded once; an embedded colour profile (Display P3 on iPhone photos) is

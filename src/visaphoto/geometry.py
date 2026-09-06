@@ -90,6 +90,11 @@ class Constraint:
     k: float = 0.0
     lo: float | None = None
     hi: float | None = None
+    lo_strict: bool = False
+    """The source says "greater than": a value equal to `lo` violates the rule. The solver
+    maximizes slack over the closed interval - its optimum is interior whenever the feasible
+    set has width - and refuses a solution that lies on a strict bound; see `solve`."""
+    hi_strict: bool = False
     hard: bool = False
     """Hard constraints must hold but earn no slack reward - source containment, for instance.
     Without this a crop drifts toward the middle of the photograph for no reason."""
@@ -396,6 +401,18 @@ def solve(
 
     slacks = {c.rule: c.slack(s, u, v) for c in constraints}
     requirements = [c for c in softs if not c.preference]
+    for c in requirements:
+        x = c.value(s, u, v)
+        on_lo = c.lo_strict and c.lo is not None and abs(x - c.lo) <= EPS
+        on_hi = c.hi_strict and c.hi is not None and abs(x - c.hi) <= EPS
+        if on_lo or on_hi:
+            bound = c.lo if on_lo else c.hi
+            return Infeasible(
+                reason="strict_bound",
+                detail=(f"{c.rule}: the only feasible value is {x:.6g}, on a bound the source "
+                        f"states strictly ({'>' if on_lo else '<'} {bound:g})"),
+                conflicting_rules=[(c.rule, c.rule)],
+            )
     return Solution(
         scale=s, crop_x=v / s, crop_y=u / s,
         output_width=output_width, output_height=output_height,
