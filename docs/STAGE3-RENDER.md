@@ -83,10 +83,10 @@ this after the fact; the history is the only record.
 
 ## Sequence
 
-- [ ] This document.
-- [ ] `Encoding` on profiles; operation policy consulted through one function.
-- [ ] `render.py`: operation gates and record; crop+resize via float box; background
+- [x] This document.
+- [x] `Encoding` on profiles; operation policy consulted through one function.
+- [x] `render.py`: operation gates and record; crop+resize via float box; background
       replacement in source space with the opt-in flag.
-- [ ] `encode.py`: bounded candidate search measuring written bytes; `no_encoding_satisfies`.
-- [ ] `--out` on the CLI; operation history in text and JSON.
-- [ ] Tests as above.
+- [x] `encode.py`: bounded candidate search measuring written bytes; `no_encoding_satisfies`.
+- [x] `--out` on the CLI; operation history in text and JSON.
+- [x] Tests as above.

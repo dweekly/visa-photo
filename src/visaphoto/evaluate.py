@@ -356,7 +356,7 @@ def measure_all(pixels, lm: LandmarkFit, matte: seg.MatteFit, *, source: str,
     candidates = _candidates(raw)
 
     result = MeasurementSet(source=source, image_width=raw.width, image_height=raw.height,
-                            gate_record=record)
+                            gate_record=record, matte_alpha=matte.alpha)
     result.backends["mediapipe"] = lm.version
     if matte.version:
         result.backends["rembg"] = matte.version

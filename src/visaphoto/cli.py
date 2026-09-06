@@ -8,6 +8,7 @@ difference between "this photo has a problem" and "this tool broke":
     2  could not measure (no face, several faces, unreadable image, missing model)
     3  usage or configuration error
     4  measured fine, but no crop can satisfy the requested profile
+    5  a crop was found, but the file could not be rendered or encoded within the profile
 """
 
 from __future__ import annotations
@@ -17,17 +18,20 @@ import json
 import sys
 from pathlib import Path
 
+from .encode import encode
 from .geometry import Infeasible, Solution
-from .measure import MeasurementError, measure_photo
+from .measure import MeasurementError, load_rgb, measure_photo
 from .plan import make_plan
 from .preflight import Outcome
 from .profiles import PROFILES
+from .render import render
 
 EXIT_OK = 0
 EXIT_WARNINGS = 1
 EXIT_CANNOT_MEASURE = 2
 EXIT_USAGE = 3
 EXIT_NO_CROP = 4
+EXIT_NOT_WRITTEN = 5
 
 _SYMBOL = {
     Outcome.LIKELY_OK: "ok  ",
@@ -134,6 +138,26 @@ def _capabilities(as_json: bool) -> int:
     return EXIT_OK
 
 
+def _render_history(rendered, encoded, out) -> None:
+    print("\noperations")
+    for h in rendered.history:
+        flag = "  (opt-in)" if h.opt_in else ""
+        print(f"  {h.name:<20} {h.status:<8} {h.detail}{flag}")
+        for gid, sat, det in h.gates:
+            print(f"  {'':<20}          gate {gid} = {sat}: {det}")
+    if encoded is not None:
+        print(f"  {'encode':<20} {encoded.status:<8} {encoded.detail}")
+        for t in encoded.trace:
+            print(f"  {'':<20}          q{t['quality']}: {t['bytes']} bytes"
+                  f"{' <- chosen' if t['fits'] else ''}")
+    if rendered.rendered and encoded is not None and encoded.done:
+        print(f"\n  written: {encoded.path}")
+    elif rendered.rendered and encoded is None:
+        print(f"\n  written: {out} (print profile: no digital encoding rules; Pillow defaults)")
+    else:
+        print("\n  NOT WRITTEN")
+
+
 def _fetch_models() -> int:
     """Download model weights. Kept separate from measurement on purpose: photo processing
     must never open a network connection, so that the offline promise is testable."""
@@ -209,6 +233,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--list-specs", action="store_true", help="list available profiles and exit",
     )
+    parser.add_argument(
+        "--out", type=Path, default=None, metavar="FILE",
+        help="render the planned crop and write it here (requires --spec)",
+    )
+    parser.add_argument(
+        "--allow-unresolved-operations", action="store_true",
+        help="perform operations the destination's rules do not address (e.g. background "
+             "replacement for China). Recorded in the report as an opt-in.",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     parser.add_argument("--no-segmentation", action="store_true",
                         help="skip the person matte (faster; no crown or silhouette width)")
@@ -220,6 +253,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{key:<20} {profile.destination} - {profile.channel}")
             print(f"{'':<20} sizes: {sizes}")
         return EXIT_OK
+
+    if args.out is not None and args.spec is None:
+        print("error: --out requires --spec: a file is rendered for one destination profile",
+              file=sys.stderr)
+        return EXIT_USAGE
 
     if args.spec is not None and args.spec not in PROFILES:
         print(
@@ -257,12 +295,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cannot measure: {face.detail}", file=sys.stderr)
     plan = make_plan(PROFILES[args.spec], measurements) if args.spec else None
 
+    rendered = encoded = None
+    if plan is not None and plan.feasible and args.out is not None and not cannot_measure:
+        profile = PROFILES[args.spec]
+        rendered = render(load_rgb(args.photo), measurements, plan, profile,
+                          allow_unresolved=args.allow_unresolved_operations)
+        if rendered.rendered and profile.encoding is not None:
+            encoded = encode(rendered.image, profile.encoding, args.out)
+        elif rendered.rendered:
+            rendered.image.save(args.out)  # a print profile: no digital limits to search
+
     if args.json:
         json.dump(
             {
                 "measurements": measurements.to_dict(),
                 "preflight": preflight.to_dict(),
                 "plan": plan.to_dict() if plan else None,
+                "render": rendered.to_dict() if rendered else None,
+                "encode": encoded.to_dict() if encoded else None,
             },
             sys.stdout, indent=2,
         )
@@ -271,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         _render(measurements, preflight)
         if plan:
             _render_plan(plan)
+        if rendered:
+            _render_history(rendered, encoded, args.out)
 
     # The report is emitted in every case so a caller can see what was established; the exit
     # code still says the photo could not be measured. Checked before plan feasibility, so a
@@ -279,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CANNOT_MEASURE
     if plan and not plan.feasible:
         return EXIT_NO_CROP
+    if args.out is not None and (rendered is None or not rendered.rendered
+                                 or (encoded is not None and not encoded.done)):
+        return EXIT_NOT_WRITTEN
     return EXIT_WARNINGS if preflight.warnings else EXIT_OK
 
 

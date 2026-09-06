@@ -47,6 +47,30 @@ class Rule:
 
 
 @dataclass(frozen=True)
+class Encoding:
+    """A channel's published file-format rules. Absent when the channel is a print."""
+
+    format: str
+    colour: str
+    min_bytes: int | None
+    max_bytes: int | None
+    quote: str
+    subsampling: str = "4:4:4"
+    """Chroma subsampling for JPEG output. Not published by any source surveyed; 4:4:4 is
+    this tool's choice, because a 354-px-wide face has no chroma to spare."""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"format": self.format, "colour": self.colour, "min_bytes": self.min_bytes,
+                "max_bytes": self.max_bytes, "subsampling": self.subsampling, "quote": self.quote}
+
+
+OPERATIONS: tuple[str, ...] = (
+    "crop", "resize", "encode", "rotate", "replace_background", "adjust_colour",
+    "synthesize_pixels",
+)
+
+
+@dataclass(frozen=True)
 class OutputSize:
     width: int
     height: int
@@ -76,7 +100,18 @@ class Profile:
     literally and only at sizes we can justify - see `sizes_for_pixel_rules`."""
 
     operations: dict[str, str] = field(default_factory=dict)
+    encoding: Encoding | None = None
     notes: tuple[str, ...] = ()
+
+    def policy(self, operation: str) -> str:
+        """allowed / prohibited / unresolved. Unstated is unresolved - never allowed by default.
+
+        Doing something a channel has not addressed, to an identity photograph, is not a
+        decision this tool makes for the applicant. See docs/STAGE3-RENDER.md.
+        """
+        if operation not in OPERATIONS:
+            raise ValueError(f"unknown operation {operation!r}")
+        return self.operations.get(operation, "unresolved")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -88,7 +123,8 @@ class Profile:
                 if self.reference_size else None
             ),
             "rules": [r.to_dict() for r in self.rules],
-            "operations": self.operations,
+            "operations": {op: self.policy(op) for op in OPERATIONS},
+            "encoding": self.encoding.to_dict() if self.encoding else None,
             "notes": list(self.notes),
         }
 
@@ -151,6 +187,10 @@ CN_VISA_DIGITAL = Profile(
         "rotate": "unresolved", "replace_background": "unresolved",
         "adjust_colour": "unresolved", "synthesize_pixels": "prohibited",
     },
+    encoding=Encoding(
+        format="jpeg", colour="srgb_24bit", min_bytes=40 * 1024, max_bytes=120 * 1024,
+        quote="JPEG and the image file size: 40 KB - 120 KB. ... RGB 24bit true colour.",
+    ),
     notes=(
         "This channel states NO head-height bound. Do not import one from the paper profile.",
         "MFA allows up to 420x560; the CVASC upload FAQ says photos cannot exceed 354x472.",
