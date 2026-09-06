@@ -57,6 +57,33 @@ class OutputSize:
 
 
 @dataclass(frozen=True)
+class Encoding:
+    """A channel's published file rules, as quoted, beside this tool's reading of them.
+
+    `quote` is the source's wording. `min_bytes` / `max_bytes` / `colour` / `subsampling` are
+    the interpretation the encoder enforces, and `interpretation` says how the numbers were read
+    and which choices are the tool's own. Absent on a print profile.
+    """
+
+    format: str
+    """`jpeg` is the only format this build writes."""
+    colour: str
+    """`srgb_24bit`: 8 bits per channel RGB, sRGB primaries, written without a profile."""
+    min_bytes: int | None
+    max_bytes: int | None
+    quote: str
+    interpretation: str
+    subsampling: str = "4:4:4"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "format": self.format, "colour": self.colour, "min_bytes": self.min_bytes,
+            "max_bytes": self.max_bytes, "subsampling": self.subsampling, "quote": self.quote,
+            "interpretation": self.interpretation,
+        }
+
+
+@dataclass(frozen=True)
 class Profile:
     key: str
     destination: str
@@ -76,6 +103,8 @@ class Profile:
     literally and only at sizes we can justify - see `sizes_for_pixel_rules`."""
 
     operations: dict[str, str] = field(default_factory=dict)
+    encoding: Encoding | None = None
+    """The channel's file rules for a digital upload; None for a print profile."""
     notes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -89,6 +118,7 @@ class Profile:
             ),
             "rules": [r.to_dict() for r in self.rules],
             "operations": self.operations,
+            "encoding": self.encoding.to_dict() if self.encoding else None,
             "notes": list(self.notes),
         }
 
@@ -151,6 +181,15 @@ CN_VISA_DIGITAL = Profile(
         "rotate": "unresolved", "replace_background": "unresolved",
         "adjust_colour": "unresolved", "synthesize_pixels": "prohibited",
     },
+    encoding=Encoding(
+        format="jpeg", colour="srgb_24bit", min_bytes=40 * 1024, max_bytes=120 * 1000,
+        quote="Colour Space: RGB 24bit true colour. Image Compression: JPEG and the image "
+              "file size: 40 KB - 120 KB.",
+        interpretation="'40 KB - 120 KB' is read as 40,960-120,000 bytes: the intersection of "
+                       "the 1,000- and 1,024-byte readings of KB, so a file inside it satisfies "
+                       "either. The sheet states 24-bit RGB; sRGB as the RGB space, and 4:4:4 "
+                       "chroma, are this tool's choices.",
+    ),
     notes=(
         "This channel states NO head-height bound. Do not import one from the paper profile.",
         "MFA allows up to 420x560; the CVASC upload FAQ says photos cannot exceed 354x472.",

@@ -23,12 +23,39 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
 - **Calibration beyond one subject.** MST-E, then the Chicago Face Database, then consenting
   volunteers for the matched failure conditions no dataset covers. Sources, terms and the analysis
   design are in [docs/PLAN.md](docs/PLAN.md) → Calibration. After Stage 1b.
-- **Stage 3 — render and encode.** Crop, background replacement *where the channel permits it*,
-  resize, and a bounded encoder search against format, colour-space and byte-band constraints.
+- **Stage 3 — render and encode.** In progress on PR #5, a lean rebuild of the parked #4: one
+  decode, colour conversion to sRGB, one resample, a bounded JPEG quality search on written
+  bytes with staged writes, `--out`. Plan and scope in
+  [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md).
 - **Stage 4 — validator and report contract.** Per-criterion pass / fail / indeterminate /
-  not-evaluated, each with a reason, measured from the written file.
+  not-evaluated, each with a reason, measured from the written file. Re-fitting after colour
+  conversion, downsampling and JPEG encoding moves landmarks and matte edges; record predicted
+  versus observed positions and their deltas, and keep geometric feasibility distinct from
+  compliance of the written file.
 - **Stage 5 — seeded profiles and docs.** `cn_visa_digital`, `cn_visa_paper`, `us_visa_digital`,
   `us_passport_print`, `schengen_icao_base`, `nz_nzeta`.
+
+## Deferred from Stage 3, with the facts attached
+
+- **Background replacement.** No planned destination allows it: China's sheet does not address
+  editing, NZ prohibits it, the US prohibits digital alteration, ICAO does too. The parked
+  attempt (PR #4, branch `stage3-render`) gated it on the isolation gate and a crop-edge check;
+  the edge check refused the reference photo (shoulders cross the crop's sides, as a compliant
+  crop makes them), and the isolation's soft-edge extension could be bridged by faint alpha to
+  re-admit a rejected fragment (review pass three, reproduction in the branch's stage doc; a
+  nearest-solid-component fix was spiked at 0.29 s on a 7 MP matte). Revisit when a destination
+  allows it and someone needs it, starting from those two failures.
+- **Print output.** A print profile needs physical size and DPI set from its millimetres, not a
+  file at Pillow defaults.
+- **Joint plan-and-encoding search.** `make_plan` picks geometry by slack, blind to
+  compressibility; when no listed quality fits, another feasible crop or output size might.
+  China permits solving at its reference size only today, so this waits for a profile with
+  several sizes.
+- **Operation permission as a planning prerequisite.** `Plan.feasible` establishes geometry, not
+  that the profile permits crop, resize and encode. Every seeded profile allows all three; before
+  one that does not, permission joins the plan or becomes an explicit execution gate.
+- **Non-RGB sources.** CMYK and grey-profiled sources take the same colour path as RGB and are
+  not claimed; a portable ICC fixture is needed before they are.
 
 ## Adoption: distribution and the Claude skill
 

@@ -8,6 +8,7 @@ difference between "this photo has a problem" and "this tool broke":
     2  could not measure (no face, several faces, unreadable image, missing model)
     3  usage or configuration error
     4  measured fine, but no crop can satisfy the requested profile
+    5  a crop was found, but no file could be written within the profile's encoding rules
 """
 
 from __future__ import annotations
@@ -18,16 +19,19 @@ import sys
 from pathlib import Path
 
 from .geometry import Infeasible, Solution
-from .measure import MeasurementError, measure_photo
+from .encode import EncodeResult, encode
+from .measure import MeasurementError, load_source, measure_photo
 from .plan import make_plan
 from .preflight import Outcome
 from .profiles import PROFILES
+from .render import render
 
 EXIT_OK = 0
 EXIT_WARNINGS = 1
 EXIT_CANNOT_MEASURE = 2
 EXIT_USAGE = 3
 EXIT_NO_CROP = 4
+EXIT_NOT_WRITTEN = 5
 
 _SYMBOL = {
     Outcome.LIKELY_OK: "ok  ",
@@ -209,6 +213,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--list-specs", action="store_true", help="list available profiles and exit",
     )
+    parser.add_argument(
+        "--out", type=Path, default=None, metavar="FILE",
+        help="render the planned crop and write it here (requires --spec, digital profiles only)",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     parser.add_argument("--no-segmentation", action="store_true",
                         help="skip the person matte (faster; no crown or silhouette width)")
@@ -240,12 +248,38 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: no such file: {args.photo}", file=sys.stderr)
         return EXIT_USAGE
 
+    out_unusable: str | None = None
+    if args.out is not None:
+        if args.spec is None:
+            print("error: --out requires --spec: a file is rendered for one destination profile",
+                  file=sys.stderr)
+            return EXIT_USAGE
+        if PROFILES[args.spec].encoding is None:
+            print(f"error: {args.spec} states no digital encoding rules; --out is not supported "
+                  "for print profiles yet", file=sys.stderr)
+            return EXIT_USAGE
+        # samefile, not path equality: on a case-insensitive filesystem PHOTO.jpg and photo.jpg
+        # resolve to different strings and the same file, as does a hard link anywhere.
+        try:
+            same = args.out.exists() and args.out.samefile(args.photo)
+        except OSError as exc:
+            # The destination cannot even be inspected (a directory the user cannot traverse).
+            # That is a write failure, reported with the rest of the run rather than raised here.
+            same, out_unusable = False, f"could not check {args.out}: {exc}"
+        if same:
+            print("error: --out is the input photo; the original is never overwritten",
+                  file=sys.stderr)
+            return EXIT_USAGE
+
     try:
+        # One decode: measurement and rendering work from the same pixels.
+        source = load_source(args.photo)
         measurements, preflight = measure_photo(
             args.photo,
             model=args.model,
             jurisdiction=args.jurisdiction,
             segmentation_enabled=not args.no_segmentation,
+            source=source,
         )
     except MeasurementError as exc:
         print(f"cannot measure: {exc}", file=sys.stderr)
@@ -257,12 +291,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"cannot measure: {face.detail}", file=sys.stderr)
     plan = make_plan(PROFILES[args.spec], measurements) if args.spec else None
 
+    rendered = encoded = None
+    if args.out is not None and plan is not None and plan.feasible and not cannot_measure:
+        rendered = render(source, plan)
+        if rendered.rendered and out_unusable:
+            encoded = EncodeResult("write_failed", None, None, None, [], out_unusable)
+        elif rendered.rendered:
+            encoded = encode(rendered.image, PROFILES[args.spec].encoding, args.out)
+
     if args.json:
         json.dump(
             {
                 "measurements": measurements.to_dict(),
                 "preflight": preflight.to_dict(),
                 "plan": plan.to_dict() if plan else None,
+                "render": rendered.to_dict() if rendered else None,
+                "encode": encoded.to_dict() if encoded else None,
             },
             sys.stdout, indent=2,
         )
@@ -271,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         _render(measurements, preflight)
         if plan:
             _render_plan(plan)
+        if rendered:
+            _render_history(rendered, encoded)
 
     # The report is emitted in every case so a caller can see what was established; the exit
     # code still says the photo could not be measured. Checked before plan feasibility, so a
@@ -279,7 +325,29 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CANNOT_MEASURE
     if plan and not plan.feasible:
         return EXIT_NO_CROP
+    if args.out is not None and (encoded is None or not encoded.done):
+        return EXIT_NOT_WRITTEN
     return EXIT_WARNINGS if preflight.warnings else EXIT_OK
+
+
+def _render_history(rendered, encoded) -> None:
+    print("\noperations")
+    for h in rendered.history:
+        print(f"  {h.name:<16} {h.status:<8} {h.detail}")
+        if h.name == "crop_resize" and h.status == "done":
+            box = ", ".join(f"{v:.2f}" for v in h.params["box"])
+            out = h.params["output"]
+            print(f"  {'':<16}          box ({box}) scale {h.params['scale']:.5f} "
+                  f"-> {out['width']}x{out['height']}")
+    if encoded is not None:
+        print(f"  {'encode':<16} {encoded.status:<8} {encoded.detail}")
+        for t in encoded.trace:
+            print(f"  {'':<16}          q{t['quality']}: {t['bytes']} bytes"
+                  f"{' <- chosen' if t['fits'] else ''}")
+    if encoded is not None and encoded.done:
+        print(f"\n  written: {encoded.path}")
+    else:
+        print("\n  NOT WRITTEN")
 
 
 if __name__ == "__main__":

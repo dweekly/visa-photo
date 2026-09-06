@@ -4,7 +4,21 @@ User-facing changes, newest first. Cited from [README.md](README.md).
 
 ## Unreleased
 
-Nothing released yet. The project is at Stage 0 of 5; see [ROADMAP.md](ROADMAP.md).
+Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
+
+### Added (unreleased, Stage 3)
+- `--out FILE` renders the planned crop and writes it (requires `--spec` and a digital profile).
+  The photo is decoded once; an embedded colour profile (Display P3 on iPhone photos) is
+  converted to sRGB, and a photo without one is written as-is with the assumption stated. Crop
+  and resize are one resample. The output is an 8-bit sRGB JPEG, 4:4:4, carrying nothing from
+  the source - no EXIF, no profile, no comment - at the highest listed quality whose written
+  size falls inside the destination's byte band (China's "40 KB - 120 KB" read as
+  40,960-120,000 bytes, satisfying either reading of KB).
+- When no listed quality fits, or the destination cannot be written, nothing at `--out` is
+  touched and the report says why, with every quality tried (exit 5). `--out` naming the input
+  photo is refused.
+- The report records what was done to the pixels, in order - colour conversion, crop and
+  resize (box, scale, output size), encoding (quality, bytes, trace) - and claims nothing else.
 
 ### Changed (unreleased, Stage 1b)
 - A measurement is now unavailable unless every gate it declares is affirmatively true. Gates
