@@ -3,8 +3,9 @@
 Turn an ordinary portrait into a photo that satisfies a specific country's visa or passport
 photo rules — and, just as importantly, tell you honestly when it can't.
 
-**Status: early. Stage 1 of 5 complete** — it measures a portrait and checks it against sourced
-requirements, but does not yet produce a photo. See [ROADMAP.md](ROADMAP.md).
+**Status: early. Stages 1–3 of 5 merged, Stage 4 in progress** — it measures a portrait, plans
+a crop against China's digital rules, writes the file, and (Stage 4) checks the written file rule
+by rule. One destination so far. See [ROADMAP.md](ROADMAP.md).
 
 ## The problem this solves
 
@@ -65,6 +66,26 @@ This tool reports what it measured against rules we transcribed from official so
 date. Requirements change, sources disagree, and consular officers exercise judgement. A passing
 report is evidence, not a promise of acceptance.
 
+## The report
+
+`--json` emits one envelope for every photo run, whatever stage it reached:
+
+| key | what |
+|---|---|
+| `report_version` | the envelope's version, `1` |
+| `tool` | `version` and the model backends with their versions |
+| `error` | null, or why a stage could not run |
+| `measurements`, `preflight` | the input photo: every measurement with its gates, and the advisories |
+| `plan` | the crop the solver chose for `--spec`, or why none exists |
+| `render`, `encode` | what was done to the pixels and how the file was written |
+| `validation` | the written file (after `--out`) or the given file (`--validate`): its own facts, measurements and advisories, one criterion per rule and per encoding check with verdict, observed value, the plan's prediction and their delta, and an aggregate over implemented checks only, beside the attestations still required and what this build cannot assess |
+
+A stage not reached is `null`. Verdicts are `pass`, `fail`, `indeterminate` (the value, with its
+interval, straddles a bound — or the source's own readings disagree) and `not_evaluated` (the
+measurement was unavailable, or the rule is not stated at this file's size). The interval is the
+model's disagreement with itself between the source and the written file, not an accuracy claim.
+Exit codes are in `visa-photo --help`.
+
 ## Documentation
 
 | Document | What it is |
@@ -73,6 +94,7 @@ report is evidence, not a promise of acceptance.
 | [docs/STAGE2-SOLVER.md](docs/STAGE2-SOLVER.md) | Working plan for the geometry solver. Fresh as of 2026-09-04. |
 | [docs/STAGE1B-PRECONDITIONS.md](docs/STAGE1B-PRECONDITIONS.md) | Gate graph, registry and sequence for precondition-driven measurement. Fresh as of 2026-09-06. |
 | [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md) | Working plan for rendering and encoding: what is in, what is out and why. Fresh as of 2026-09-06. |
+| [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md) | Working plan for validating the written file and the report contract. Fresh as of 2026-09-06. |
 | [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md) | Approaches that failed, so they aren't retried. Fresh as of 2026-09-04. |
 | [ROADMAP.md](ROADMAP.md) | Stack-ranked next steps. Fresh as of 2026-09-06. |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing changes per release. |

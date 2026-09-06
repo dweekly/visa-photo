@@ -9,6 +9,10 @@ difference between "this photo has a problem" and "this tool broke":
     3  usage or configuration error
     4  measured fine, but no crop can satisfy the requested profile
     5  a crop was found, but no file could be written within the profile's encoding rules
+    6  the written file, or the file given with --validate, fails a rule or an encoding check
+
+Precedence, highest first: 2 (the input, or the written output, could not be measured - the
+report says which; a written file is never called "not written"), 4, 5, 6, 1, 0.
 """
 
 from __future__ import annotations
@@ -16,15 +20,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import Any
 from pathlib import Path
 
 from .geometry import Infeasible, Solution
+from . import __version__
 from .encode import EncodeResult, encode
 from .measure import MeasurementError, load_source, measure_photo
 from .plan import make_plan
 from .preflight import Outcome
 from .profiles import PROFILES
 from .render import render
+from .validate import REPORT_VERSION, file_facts, predict, validate
 
 EXIT_OK = 0
 EXIT_WARNINGS = 1
@@ -32,6 +39,7 @@ EXIT_CANNOT_MEASURE = 2
 EXIT_USAGE = 3
 EXIT_NO_CROP = 4
 EXIT_NOT_WRITTEN = 5
+EXIT_FAILS = 6
 
 _SYMBOL = {
     Outcome.LIKELY_OK: "ok  ",
@@ -42,7 +50,7 @@ _SYMBOL = {
 }
 
 
-def _render(measurements, preflight) -> None:
+def _render(measurements, preflight, validated: bool = False) -> None:
     print(f"source   {measurements.source}")
     print(f"image    {measurements.image_width} x {measurements.image_height}")
     print(f"backends {', '.join(f'{k} {v}' for k, v in measurements.backends.items())}")
@@ -73,7 +81,11 @@ def _render(measurements, preflight) -> None:
         print(f"{len(warnings)} advisory warning(s). These are uncalibrated heuristics, not a")
         print("compliance verdict - a human should look at the photo.")
     else:
-        print("No advisory warnings. This is NOT a statement of compliance: geometry has not")
+        if validated:
+            print("No advisory warnings on the input. Geometry and encoding are checked below, from")
+            print("the written file itself.")
+        else:
+            print("No advisory warnings. This is NOT a statement of compliance: geometry has not")
         print("been checked, and several requirements above could not be evaluated at all.")
 
 
@@ -217,6 +229,11 @@ def main(argv: list[str] | None = None) -> int:
         "--out", type=Path, default=None, metavar="FILE",
         help="render the planned crop and write it here (requires --spec, digital profiles only)",
     )
+    parser.add_argument(
+        "--validate", action="store_true",
+        help="check the photo as a finished file against --spec, at its own size; no crop is "
+             "planned. Cannot be combined with --out.",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     parser.add_argument("--no-segmentation", action="store_true",
                         help="skip the person matte (faster; no crown or silhouette width)")
@@ -248,15 +265,34 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: no such file: {args.photo}", file=sys.stderr)
         return EXIT_USAGE
 
+    profile = PROFILES[args.spec] if args.spec else None
+    if args.validate and args.out is not None:
+        print("error: --validate checks a finished file; --out writes one. Use one or the other.",
+              file=sys.stderr)
+        return EXIT_USAGE
+    if args.validate and profile is None:
+        print("error: --validate requires --spec: a file is checked against one destination "
+              "profile", file=sys.stderr)
+        return EXIT_USAGE
+    if (args.validate or args.out is not None) and profile is not None and profile.encoding is None:
+        print(f"error: {args.spec} states no digital encoding rules; --out and --validate are "
+              "not supported for print profiles yet", file=sys.stderr)
+        return EXIT_USAGE
+    # A profile names the jurisdiction whose advisories apply beside its rules. --for may
+    # agree; it may not point somewhere else.
+    jurisdiction = args.jurisdiction
+    if profile is not None:
+        if jurisdiction is not None and jurisdiction.upper() != profile.jurisdiction:
+            print(f"error: --for {jurisdiction} conflicts with --spec {args.spec}, whose "
+                  f"requirements are {profile.jurisdiction}'s", file=sys.stderr)
+            return EXIT_USAGE
+        jurisdiction = profile.jurisdiction
+
     out_unusable: str | None = None
     if args.out is not None:
-        if args.spec is None:
+        if profile is None:
             print("error: --out requires --spec: a file is rendered for one destination profile",
                   file=sys.stderr)
-            return EXIT_USAGE
-        if PROFILES[args.spec].encoding is None:
-            print(f"error: {args.spec} states no digital encoding rules; --out is not supported "
-                  "for print profiles yet", file=sys.stderr)
             return EXIT_USAGE
         # samefile, not path equality: on a case-insensitive filesystem PHOTO.jpg and photo.jpg
         # resolve to different strings and the same file, as does a hard link anywhere.
@@ -271,52 +307,100 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
             return EXIT_USAGE
 
+    # The report envelope. Every photo run emits it under --json, whatever stage it reached;
+    # a stage not reached is null, and a stage that could not run sets `error`.
+    report: dict[str, Any] = {
+        "report_version": REPORT_VERSION,
+        "tool": {"version": __version__, "backends": {}},
+        "error": None,
+        "measurements": None, "preflight": None, "plan": None, "render": None,
+        "encode": None, "validation": None,
+    }
+
+    def emit_json() -> None:
+        json.dump(report, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+
     try:
-        # One decode: measurement and rendering work from the same pixels.
+        # One decode per snapshot: measurement and rendering work from the same pixels.
         source = load_source(args.photo)
         measurements, preflight = measure_photo(
             args.photo,
             model=args.model,
-            jurisdiction=args.jurisdiction,
+            jurisdiction=jurisdiction,
             segmentation_enabled=not args.no_segmentation,
             source=source,
         )
     except MeasurementError as exc:
+        report["error"] = f"cannot measure: {exc}"
+        if args.json:
+            emit_json()
         print(f"cannot measure: {exc}", file=sys.stderr)
         return EXIT_CANNOT_MEASURE
+
+    report["tool"]["backends"] = dict(measurements.backends)
+    report["measurements"] = measurements.to_dict()
+    report["preflight"] = preflight.to_dict()
 
     face = measurements.gate_record["face_detected_one"]
     cannot_measure = face.satisfied is not True
     if cannot_measure:
         print(f"cannot measure: {face.detail}", file=sys.stderr)
-    plan = make_plan(PROFILES[args.spec], measurements) if args.spec else None
 
-    rendered = encoded = None
+    plan = rendered = encoded = validation = None
+    validation_error: str | None = None
+    if args.validate:
+        facts = file_facts(args.photo, source.native.size)
+        validation = validate(profile, facts, measurements, preflight)
+    elif profile is not None:
+        plan = make_plan(profile, measurements)
+
     if args.out is not None and plan is not None and plan.feasible and not cannot_measure:
         rendered = render(source, plan)
         if rendered.rendered and out_unusable:
             encoded = EncodeResult("write_failed", None, None, None, [], out_unusable)
         elif rendered.rendered:
-            encoded = encode(rendered.image, PROFILES[args.spec].encoding, args.out)
+            encoded = encode(rendered.image, profile.encoding, args.out)
+        if encoded is not None and encoded.done:
+            # Validate the written file from the written file: decoded and measured afresh,
+            # with the plan's prediction beside each observation.
+            try:
+                out_source = load_source(args.out)
+                out_measurements, out_preflight = measure_photo(
+                    args.out, model=args.model, jurisdiction=jurisdiction,
+                    segmentation_enabled=not args.no_segmentation, source=out_source)
+                facts = file_facts(args.out, out_source.native.size)
+                validation = validate(profile, facts, out_measurements, out_preflight,
+                                      predict(profile, plan, measurements))
+                # The output's own face gate, as the input's is checked above: a written file
+                # in which no face was found is an unmeasured output, not an incomplete pass.
+                out_face = out_measurements.gate_record["face_detected_one"]
+                if out_face.satisfied is not True:
+                    validation_error = f"the written file could not be measured: {out_face.detail}"
+            except MeasurementError as exc:
+                validation_error = f"the written file could not be measured: {exc}"
+
+    report["plan"] = plan.to_dict() if plan else None
+    report["render"] = rendered.to_dict() if rendered else None
+    report["encode"] = encoded.to_dict() if encoded else None
+    if validation is not None:
+        report["validation"] = validation.to_dict()
+    if validation_error is not None:
+        report["validation"] = {**(report["validation"] or {}), "error": validation_error}
+        report["error"] = validation_error
 
     if args.json:
-        json.dump(
-            {
-                "measurements": measurements.to_dict(),
-                "preflight": preflight.to_dict(),
-                "plan": plan.to_dict() if plan else None,
-                "render": rendered.to_dict() if rendered else None,
-                "encode": encoded.to_dict() if encoded else None,
-            },
-            sys.stdout, indent=2,
-        )
-        sys.stdout.write("\n")
+        emit_json()
     else:
-        _render(measurements, preflight)
+        _render(measurements, preflight, validated=validation is not None)
         if plan:
             _render_plan(plan)
         if rendered:
             _render_history(rendered, encoded)
+        if validation is not None:
+            _render_validation(validation)
+        if validation_error is not None:
+            print(f"\nvalidation: {validation_error}")
 
     # The report is emitted in every case so a caller can see what was established; the exit
     # code still says the photo could not be measured. Checked before plan feasibility, so a
@@ -327,7 +411,27 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_NO_CROP
     if args.out is not None and (encoded is None or not encoded.done):
         return EXIT_NOT_WRITTEN
-    return EXIT_WARNINGS if preflight.warnings else EXIT_OK
+    if validation_error is not None:
+        return EXIT_CANNOT_MEASURE
+    if validation is not None and validation.fails:
+        return EXIT_FAILS
+    if preflight.warnings or (validation is not None and validation.warnings):
+        return EXIT_WARNINGS
+    return EXIT_OK
+
+
+def _render_validation(v) -> None:
+    print(f"\nvalidation of {v.facts.path} against {v.profile} "
+          f"(uncertainty: {'delta from the plan' if v.uncertainty == 'delta' else 'none - point comparison'})")
+    for c in v.criteria:
+        print(f"  {c.key:<20} {c.verdict.value:<14} {c.detail}")
+    print(f"\n  aggregate: {v.aggregate} (over implemented checks only)")
+    if v.attestations:
+        print("  still to attest: " + "; ".join(a["key"] for a in v.attestations))
+    if v.not_assessable:
+        print("  not assessable in this build: " + "; ".join(n["key"] for n in v.not_assessable))
+    if v.warnings:
+        print("  advisory warnings on this file: " + "; ".join(v.warnings))
 
 
 def _render_history(rendered, encoded) -> None:
