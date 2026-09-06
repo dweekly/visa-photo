@@ -137,7 +137,8 @@ and hands the same snapshot to both stages.
   is the published rule; the numbers beside it are this tool's interpretation, labelled as such:
   `cn_visa_digital` is JPEG, "40KB–120KB" from the MFA sheet, read as **40,960–120,000 bytes** —
   the intersection of the 1,000- and 1,024-byte readings, so a file inside it satisfies either.
-  sRGB and 4:4:4 are tool choices where the sheet states only the format. `cn_visa_paper`: none.
+  The sheet states "RGB 24bit true colour"; sRGB as the RGB space, and 4:4:4 chroma, are this
+  tool's choices. `cn_visa_paper`: none.
 
 **CLI**
 
@@ -178,7 +179,7 @@ them — is the pipeline agreeing with itself, not accuracy, and is recorded as 
 ## Sequence
 
 - [x] This document, reviewed once by Codex (GPT-6 Astra, high); ROADMAP entries; README row.
-- [ ] `Encoding` on profiles; `load_source` and `measure_photo` taking a `Source`.
-- [ ] `render.py`, `encode.py`, CLI `--out`.
-- [ ] Tests as above; real run.
+- [x] `Encoding` on profiles; `load_source` and `measure_photo` taking a `Source`.
+- [x] `render.py`, `encode.py`, CLI `--out`.
+- [x] Tests as above; real run.
 - [ ] Review under the two-pass rule; merge.

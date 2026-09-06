@@ -334,8 +334,10 @@ class TestReviewPassOne:
         from visaphoto import cli
         from visaphoto.preflight import run as preflight_run
 
+        from PIL import Image
+
         photo = tmp_path / "p.jpg"
-        photo.write_bytes(b"not really a jpeg")
+        Image.new("RGB", (W, H), (128, 128, 128)).save(photo)  # decodable; the fake below sees no face
         no_face = run(lm=landmarks(faces=0))
 
         def fake_measure_photo(*a, **k):

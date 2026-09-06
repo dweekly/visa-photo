@@ -12,7 +12,9 @@ Nothing is emitted before its gates are known. See docs/STAGE1B-PRECONDITIONS.md
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from . import preflight as preflight_mod
 from .backends import landmarks, segmentation
@@ -38,13 +40,27 @@ def default_model_path() -> Path:
     return cache / MODEL_FILENAME
 
 
-def load_rgb(photo: Path):
-    """Decode `photo` to an RGB PIL image.
+@dataclass
+class Source:
+    """One decoded photograph, the snapshot every stage of an invocation works from.
 
-    Decoding happens here, once, rather than letting each backend open the file itself.
-    MediaPipe's own loader cannot read HEIC - which is what phones produce, so it is the
-    common case, not an edge case - and registering the HEIF opener only helps Pillow.
-    EXIF orientation is applied so every downstream measurement shares one coordinate frame.
+    `native` is orientation-normalized and still in the file's own mode with its `info` intact
+    (the embedded ICC profile, if any): rendering converts colour from it. `rgb` is the RGB view
+    of the same pixels, which is what measurement reads.
+    """
+
+    native: Any
+    rgb: Any
+
+
+def load_source(photo: Path) -> Source:
+    """Decode `photo` once.
+
+    Decoding happens here rather than letting each backend open the file itself. MediaPipe's
+    own loader cannot read HEIC - which is what phones produce, so it is the common case, not
+    an edge case - and registering the HEIF opener only helps Pillow. EXIF orientation is
+    applied so every downstream measurement shares one coordinate frame. Raises
+    MeasurementError when the file cannot be decoded.
     """
     from PIL import Image, ImageOps
 
@@ -54,8 +70,18 @@ def load_rgb(photo: Path):
         pillow_heif.register_heif_opener()
     except Exception:  # noqa: BLE001 - HEIC support is optional
         pass
-    with Image.open(photo) as image:
-        return ImageOps.exif_transpose(image).convert("RGB")
+    try:
+        with Image.open(photo) as image:
+            native = ImageOps.exif_transpose(image)
+    except Exception as exc:  # noqa: BLE001 - any decode failure is the same to the caller
+        raise MeasurementError(f"could not read {photo}: {exc}") from exc
+    rgb = native if native.mode == "RGB" else native.convert("RGB")
+    return Source(native=native, rgb=rgb)
+
+
+def load_rgb(photo: Path):
+    """The RGB view of `photo`, decoded once. See `load_source`."""
+    return load_source(photo).rgb
 
 
 def measure_photo(
@@ -63,8 +89,12 @@ def measure_photo(
     model: Path | None = None,
     jurisdiction: str | None = None,
     segmentation_enabled: bool = True,
+    source: Source | None = None,
 ):
     """Measure `photo` and run pre-flight checks.
+
+    `source` is the decoded snapshot when the caller already holds one (the CLI decodes once and
+    renders from the same pixels); otherwise the photo is decoded here.
 
     Raises MeasurementError only when nothing can start: the image is unreadable or the model
     bundle is absent. Everything else - no face, several faces, a failed model, an unusable
@@ -80,10 +110,7 @@ def measure_photo(
             f"landmark model not found at {model_path}. Run 'visa-photo --fetch-models' "
             "or set VISAPHOTO_MODEL."
         )
-    try:
-        image = load_rgb(photo)
-    except Exception as exc:  # noqa: BLE001
-        raise MeasurementError(f"could not read {photo}: {exc}") from exc
+    image = (source or load_source(photo)).rgb
 
     pixels = np.asarray(image)
     lm = landmarks.fit(image, model_path)
