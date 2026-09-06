@@ -204,14 +204,19 @@ def _encoding_criteria(profile: Profile, facts: FileFacts) -> list[Criterion]:
     sizes = [{"width": s.width, "height": s.height} for s in profile.sizes]
     stored = (facts.stored_width, facts.stored_height)
     measured = (facts.measured_width, facts.measured_height)
-    if stored != measured:
+    listed = {(s.width, s.height) for s in profile.sizes}
+    if stored == measured:
+        verdict = Verdict.PASS if stored in listed else Verdict.FAIL
+        why = f"{stored[0]}x{stored[1]} is {'a' if stored in listed else 'not a'} listed size"
+    elif (stored in listed) == (measured in listed):
+        # Both frames agree, so which one the portal checks does not matter.
+        verdict = Verdict.PASS if stored in listed else Verdict.FAIL
+        why = (f"stored {stored[0]}x{stored[1]}, {measured[0]}x{measured[1]} after EXIF orientation: "
+               f"{'both' if verdict is Verdict.PASS else 'neither'} listed")
+    else:
         verdict, why = Verdict.INDETERMINATE, (
             f"stored {stored[0]}x{stored[1]}, {measured[0]}x{measured[1]} after EXIF orientation; "
-            "which the portal checks is not established")
-    elif any((s.width, s.height) == stored for s in profile.sizes):
-        verdict, why = Verdict.PASS, f"{stored[0]}x{stored[1]} is a listed size"
-    else:
-        verdict, why = Verdict.FAIL, f"{stored[0]}x{stored[1]} is not a listed size"
+            "only one is a listed size and which the portal checks is not established")
     out.append(Criterion("dimensions", "encoding", verdict, why, expected={"sizes": sizes},
                          quote=profile.sizes_quote))
 

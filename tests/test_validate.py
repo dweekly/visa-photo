@@ -236,10 +236,19 @@ class TestValidate:
         assert all(c.verdict is Verdict.NOT_EVALUATED for c in v.criteria if c.kind == "rule")
         assert v.aggregate == "fails"
 
-    def test_rotated_file_makes_dimensions_indeterminate(self):
-        v = validate(CN_VISA_DIGITAL, facts_like(stored=(472, 354)), output_measurements(feasible_plan()), None)
-        c = next(c for c in v.criteria if c.key == "dimensions")
-        assert c.verdict is Verdict.INDETERMINATE and "EXIF" in c.detail
+    def test_rotated_file_dimensions_follow_the_frames_that_are_listed(self):
+        m = output_measurements(feasible_plan())
+
+        def dims(stored, measured):
+            v = validate(CN_VISA_DIGITAL, facts_like(size=measured, stored=stored), m, None)
+            return next(c for c in v.criteria if c.key == "dimensions"), v.aggregate
+
+        c, _ = dims((472, 354), (354, 472))  # only the oriented frame is listed
+        assert c.verdict is Verdict.INDETERMINATE and "only one" in c.detail
+        c, aggregate = dims((800, 600), (600, 800))  # neither frame is listed: a definite failure
+        assert c.verdict is Verdict.FAIL and "neither" in c.detail and aggregate == "fails"
+        c, _ = dims((354, 472), (354, 472))
+        assert c.verdict is Verdict.PASS
 
 
 # --- the command ------------------------------------------------------------------------------------
