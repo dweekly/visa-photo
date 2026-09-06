@@ -1,6 +1,12 @@
 # Visa photo compliance tool — plan
 
 Reviewed once by GPT-6 Astra (high reasoning) on 2026-09-04; findings folded in below.
+Revised 2026-09-06 after Stage 1 merged: the Measurement section is rewritten around a
+precondition-driven design (a different approach, not a tweak), Stage 1b added to implement it,
+Calibration and Review-discipline sections added. Second review taken on that revision only.
+
+Current state: Stage 1 merged (`c15c3cc`). Stage 2 built on PR #2, awaiting rebase and review.
+Next: Stage 2 lands, then Stage 1b.
 
 ## Context
 
@@ -163,21 +169,160 @@ before measurement. Rotation is out of scope for v1 and stated as such.
 
 ## Measurement
 
-**The chosen stack does not automatically deliver the required anatomical quantities**, and Stage 1
-must prove each one rather than assume it. A person matte merges beard, neck and clothing into one
-foreground region — it gives the crown, but it does **not** give a visible beard boundary, and it
-does not give ICAO's ear reference points. Deliverable: a **measurement capability matrix** — which
-backend supplies each measurement definition, its uncertainty, and when it returns *unavailable*.
+Revised 2026-09-06 after Stage 1 shipped and review found the same defect six times.
 
-Unavailable is an acceptable outcome, with an optional recorded manual override. Guard against zero
-or multiple faces, clipped anatomy, segmentation fragments, hair volume, head coverings and low
-foreground/background contrast. **A matte touching the source border may mean truncation, not a
-measured crown.**
+### The invariant
 
-Carry uncertainty into both crop selection and validation. For measurement interval `[m₋, m₊]` and
-band `[a, b]`: entirely inside ⇒ passes within stated uncertainty; disjoint ⇒ fails; straddling a
-boundary ⇒ **indeterminate**. Model detection confidence is not a calibrated error interval in
-pixels or degrees and must not be used as one.
+**A measurement is unavailable unless every precondition it declares is affirmatively
+satisfied.** Not "available unless a guard fires" — the inverse. Guards enumerated one at a time
+can never be complete, and Stage 1 proved it: each guard added created a new bypass, and after
+six passes three instances of the class were still live (a hair tuft touching the top edge still
+yields `crown_y = 0` as *measured*; a gimbal-locked pose fabricates `roll = 0.0` as available;
+face-component isolation has five silent fallbacks where it quietly does not happen).
+
+The earlier version of this section listed the failures to guard against — segmentation
+fragments, clipped anatomy, matte touching the border — and named a capability matrix as a
+deliverable. It was correct and it changed nothing, because prose in a plan does not bind code.
+The correction is structural:
+
+1. **The registry is the only way to construct a measurement.** A registry maps each measurement
+   name to its required gate ids. Emitters supply a *name and a candidate value*; the
+   construction path looks up the required ids itself, resolves each against the frozen gate
+   record, and decides the status. Emitters never assemble their own evidence. Construction
+   rejects an unknown name, an empty requirement set, or a gate id the record does not contain.
+   This is the difference between enforcing *consistency* (measurement matches registry — which
+   both can get wrong together) and enforcing *completeness*.
+2. **`Precondition` is tri-state and the invariant survives construction.** `satisfied` is
+   exactly `True` / `False` / `None` (not evaluated), checked by identity, not truthiness.
+   `Precondition` and `Measurement` are frozen; the set's storage is private; every input —
+   automatic, deserialized, or manual — enters through the same validating boundary. `AVAILABLE`
+   additionally requires a present, finite value: all-true gates cannot legitimize `NaN`.
+3. **Reasons are structured first, prose second.** An unavailable measurement records *every*
+   gate that was `False` and every gate that was `None`, each with its own cause chain — not the
+   first blocker, and never an unevaluated condition described as a demonstrated failure. Prose
+   is rendered from that record. This ends the current situation where two different failures
+   share one reason string, one of them false.
+4. **The capability matrix is generated**, by `visa-photo --capabilities`, which must work with no
+   model weights installed. Per measurement: definition, unit, backend and method, heuristic
+   status, required gates, gates that are *always* `None` in this build, and whether manual
+   evidence can supply them — so permanent limits are visible before anyone processes a photo.
+   Per image, the JSON report carries every gate's evaluation.
+5. **`MeasurementSet.add` refuses a second write to the same name.** The truncated-crown bug was
+   an unavailable value overwritten by an available one; the class is closed at the container.
+6. **Execution status is separate from gate truth.** `NOT_ATTEMPTED` covers "chose not to look"
+   (`--no-segmentation`). A measurement that *was* attempted but blocked because an upstream
+   stage was disabled is `UNAVAILABLE` with that cause. "Disabled", "blocked upstream", and
+   "evaluation failed" all leave a gate `None` for different, recorded reasons.
+7. **Tests check completeness in both directions.** For each run configuration — normal,
+   `--no-segmentation`, no face, several faces, model failure — a test asserts the *complete*
+   expected set of measurement names. "Every emitted measurement matches the registry" still
+   passes when the emitter emits nothing. Alongside registry-driven tests, hand-written semantic
+   tests state anatomy dependencies directly ("obscured eyes block all three iris measurements"),
+   so a registry omission is not reproduced into the test suite.
+
+### Three passes, because ordering was the structural cause
+
+Pose and eye-occlusion are preconditions for the geometry, and today they are computed *after* the
+geometry in the same pass. The information existed and arrived too late — which is why no amount of
+guard-adding converged. `measure()` becomes:
+
+- **Fit.** Run the landmarker and the segmenter. Raw outputs only; nothing is emitted.
+- **Gates.** Evaluate gate facts into one record, then freeze it. Gate evaluators read raw fit
+  outputs and other gates only — never emitted measurements — and Emit never computes or revises
+  a gate.
+- **Emit.** Each measurement looks up its required gates and is available only if all are `True`.
+
+**The gates form an explicit acyclic graph, evaluated topologically.** Three passes remove late
+emission but not dependencies *among* gates, and one cycle is concrete: occlusion is assessed from
+eye patches; the patches are sized by eye separation; public IED requires occlusion to be ruled
+out. The graph that breaks it:
+
+    raw landmark candidates → diagnostic patches → occlusion assessment → public iris measurements
+
+The *raw* eye separation used to size the patches has weaker, explicit prerequisites than
+anatomical IED. It is a diagnostic candidate, recorded as such, and it never escapes as an
+available `inter_eye_distance`.
+
+**A negative detector result is not affirmative evidence.** This is the principal remaining route
+to "available under an unmet precondition." `eyes_not_obscured` is `True` only when the patches
+extracted, the denominator is valid, and the heuristic ran and passed; if any input is unusable it
+is `None`, with the cause. `not sunglasses_detected` is not `eyes_not_obscured`. The same rule
+applies to every gate: each records its own prerequisites and evidence method, and an unknown
+prerequisite propagates as unknown. The constructor guarantees faithful use of recorded evidence;
+it cannot make a fallible detector's assertion physically true, and the report says which it is.
+
+**Gates are named for what they establish, not for what they might authorize.**
+`transformation_matrix_present` becomes `pose_decomposition_valid`: finite values, expected shape,
+nonsingular within a stated tolerance, decomposition succeeded. An undefined yaw never becomes
+zero and unlocks a width. `face_component_isolated` establishes which matte component was
+selected — not that segmentation retained a clipped tuft; that distinction between matte geometry
+and anatomy is carried into the tiers below. Face count is a *detection assessment*: MediaPipe's
+`num_faces` is a maximum, so it is configured well above one (four), and "one face" means one
+face found in a search permitted to find several.
+
+Which pose axis gates which measurement is stated per measurement: horizontal projections (IED,
+head widths) are gated on yaw and roll; image-vertical distances (crown–chin, eye line) on pitch.
+Rotation being out of scope for rendering does not settle these definitions. The ±15° limit is a
+heuristic *operating condition* for measurement, documented in `thresholds.py`; a destination's
+legal pose tolerance is assessed separately and stays indeterminate until the pose acceptance
+gate passes.
+
+### Consequences that are new rules, not guards
+
+- **Iris-derived measurements require unobscured, open eyes.** Behind mirrored lenses the iris
+  landmarks are fabricated (the gaze probe showed `eyeLookDown` 0.47 on a sunglasses photo). So
+  `eye_line_y`, `eye_mid_x` and `inter_eye_distance` become unavailable on such a photo, and the
+  report says *IED not measurable: eyes obscured* rather than printing a number.
+- **Projected horizontal distances require yaw within a measurement-validity limit.** IED and
+  both head widths shrink as `cos(yaw)`; at 30° they are understated by 13%. The limit is a
+  documented heuristic in `thresholds.py` (initially ±15°, where the foreshortening is 3.4%),
+  distinct from any destination's *legal* pose tolerance. Gating errs toward unavailable; we do not
+  *correct* by an uncalibrated angle.
+- **The brightness-ratio denominator is redefined.** The inventory found the "cheek" patch's
+  x-range runs *between* the eyes: the denominator is the nose bridge and philtrum, nostrils
+  included. It separated the calibration photos anyway, but the definition is wrong, and it is
+  exactly where a skin-tone bias would hide. New definition: two patches lateral to and below
+  each eye, on cheek proper. This changes the measured values, so the eleven-photo calibration
+  table is re-derived, not carried over.
+- **Every landmark-derived value requires its landmarks inside the frame.** MediaPipe extrapolates
+  outside the image without complaint; today a chin below the bottom edge is reported measured.
+  This is the bottom-edge twin of the crown truncation guard, and it was missing.
+
+Unavailable remains an acceptable outcome, with an optional recorded manual override. Uncertainty
+handling is unchanged: for a measurement interval `[m₋, m₊]` and band `[a, b]`, inside ⇒ passes,
+disjoint ⇒ fails, straddling ⇒ **indeterminate**; model confidence is not a calibrated interval.
+
+### Observed quantities and anatomical claims are different tiers
+
+Some preconditions are permanently `None` in this build: the crown is not under headwear; the
+cheek patch landed on skin; the chin landmark is the anatomical chin on a bearded face. If those
+gate the measurements the solver needs, the reference photo — every photo — has no available
+crown, and the positive regressions cannot exist. That is resolved explicitly rather than by
+quietly marking the unknowns true:
+
+- **Observed tier** — named for what was actually observed: `matte_top_row`, `chin_landmark_y`,
+  `eye_line_y`, `patch_brightness_ratio`. Gated on *observation validity* (in frame, single face,
+  component isolated, decomposition valid, eyes unobscured). Available on a good photo.
+- **Anatomical tier** — `anatomical_crown_y`, `anatomical_chin_y`. Additionally gated on the
+  permanently-unknown conditions, so unavailable unless recorded, image-specific human evidence
+  supplies them. A manual override is separate provenance producing a *new* resolved result; it
+  never relabels the automatic observation as measured.
+
+Profiles bind to the observed tier and state the definition — which is honest about what China's
+diagram actually measures (the top of the matte, hair included). The report shows both tiers, so
+the gap between "where the mesh put vertex 152" and "the chin" is visible instead of hidden.
+Derived measurements keep their dependencies: `head_height` cannot be available from an available
+crown and an unavailable chin. A missing sharpness measure blocks a *sharpness* criterion, not
+every geometry measurement.
+
+### Stage 2 already consumes measurements, so it joins the invariant now
+
+The solver lands first, and `MeasurementSet.value()` currently returns a number for any available
+measurement and `None` otherwise. Acceptance condition for 1b: an unavailable or not-attempted
+measurement cannot be consumed through `.value`, a default, a cached report, or a raw diagnostic
+field. When a profile rule's measurement is unavailable, the plan reports *cannot solve with the
+available measurements* naming the rule — not "requirements conflict", and never a solve with the
+rule silently dropped. One solver/CLI test proves it.
 
 ## Model selection
 
@@ -253,12 +398,30 @@ requirements, **report that** rather than degrading quality indefinitely or padd
   exists upstream; if it reproduces on a supported Python, file it. **Exit criterion:** MediaPipe
   works ⇒ primary; otherwise OpenSeeFace with pose limits documented. This spike stays in the repo
   as a reproducible diagnostic.
-- **Stage 1 — measurement + capability matrix**, with a minimal CLI brought forward so end-to-end
-  verification starts here rather than at the end.
-- **Stage 2 — schema and solver** (exact feasibility; interpretation rule sets; operation policy).
-- **Stage 3 — render and encode** (honouring per-channel operation policy).
-- **Stage 4 — validator and report contract.**
-- **Stage 5 — seeded profiles and docs.**
+- ~~**Stage 1 — measurement**~~ Merged 2026-09-06 (PR #1, `c15c3cc`). Shipped without the
+  capability matrix this plan required; see the Measurement section for what that cost.
+- **Stage 2 — schema and solver.** Built on `stage2-solver` (PR #2, draft, +1130). Exact interval
+  feasibility, China digital and paper profiles, `--spec` CLI. Independently reproduced the
+  hand-built crop to 0.14%. Needs: retarget to `main`, rebase, one review under the two-pass rule,
+  merge. Lands **before** Stage 1b so 1b branches from the fuller base; the only overlap is
+  `cli.py`, which is small.
+- **Stage 1b — precondition-driven measurement.** The rework described under Measurement. Own
+  branch off `main` after Stage 2 merges; own PR; own plan file `docs/STAGE1B-PRECONDITIONS.md`
+  committed before code. Scope is exactly: `Precondition` + registry + constructor invariant;
+  three-pass `measure()`; `NOT_ATTEMPTED`; `add()` refusing double writes; the seven inventory
+  fixes (top-edge tuft, gimbal roll, mis-attributed reason, eye-patch bottom bound, silent
+  isolation fallbacks, landmark-in-frame, `--no-segmentation` absence); the acyclic gate graph;
+  yaw/roll and eye-occlusion as gates; observed and anatomical tiers; the Stage 2 consumer
+  refusal; cheek patch definition finished, then re-derived; `--capabilities` output. **Not** in
+  scope: any new detector, gaze, a second calibration subject, or report versioning (Stage 4).
+- **Stage 3 — render and encode**, honouring per-channel operation policy. Rendering operations
+  declare preconditions the same way measurements do — background replacement requires the
+  policy to allow it *and* the matte to have isolated the face — so the class fixed in 1b does not
+  reappear here.
+- **Stage 4 — validator and report contract.** Same rule: a criterion's verdict is `not_evaluated`
+  unless its inputs' preconditions held.
+- **Stage 5 — seeded profiles, docs, skill.** Load `plugin-dev:skill-development` and
+  `plugin-dev:plugin-structure` before writing `SKILL.md`; run `plugin-dev:skill-reviewer` over it.
 
 ## Verification
 
@@ -285,6 +448,50 @@ overall pass, because no background check is implemented yet.
 **The real personal photo stays out of the public repository** unless its publication is explicitly
 authorized; public CI needs redistributable fixtures. The ONOT synthetic ICAO-compliant mugshot
 dataset is a candidate source.
+
+### Stage 1b verification
+
+Every test below drives `measure()` end to end with the model calls stubbed — never the helper —
+because the pass-3 finding was a fix that existed only in a helper the production path never
+called.
+
+- Registry completeness: every registry entry declares ≥1 precondition; every emitted
+  `Measurement` carries exactly the registry's set for its name. Fails on any drift.
+- Constructor invariant: `AVAILABLE` with any precondition `False` or `None` raises.
+- `add()` raises on a second write to the same name.
+- One reproduction per inventory bug, each through `measure()`: a narrow tuft touching the top
+  edge ⇒ `crown_y` unavailable, precondition `matte_clear_of_top_edge`; a gimbal-locked matrix ⇒
+  `pose_roll` unavailable, `not_gimbal_locked`; IED of 2 px ⇒ eye patches unavailable with
+  `ied_sufficient_for_patch`, *not* "outside the image"; eye patch off the bottom edge ⇒
+  unavailable; eye pixel on matte background ⇒ `face_component_isolated` false and both matte
+  measurements unavailable; chin below the frame ⇒ `chin_y_landmark` unavailable.
+- Gates on the posed set, via the checked-in measurements: 8847 (yaw 35°) ⇒ IED and both head
+  widths unavailable naming `yaw_within_measurement_limit`; 8850 (12°) ⇒ available. 8853 (mirrored
+  shades) ⇒ iris-derived measurements unavailable naming `eyes_not_obscured`; 8864 (shades on
+  head) ⇒ available.
+- Regression: the reference photo still measures crown 493, eye line 1320, IED 495, width 1086.
+- The cheek-patch recalibration re-derives the eleven brightness ratios and *reports whether a
+  usable separation remains*. If it does not, the test asserts the gate is `None` — never a
+  threshold tuned until eleven examples separate.
+- `visa-photo --capabilities` output is asserted against the registry, so the matrix cannot
+  drift from the code that enforces it, and it runs with no weights installed.
+- **Discriminating regressions.** Each inventory reproduction asserts the target gate's exact
+  evaluation and reason chain, *and* a paired case with the defect removed that yields the
+  measurement — supplying explicit evidence for unrelated `None` gates where an available result
+  is needed. A tuft test that "passes" because every crown is already blocked by an unknown gate
+  has shown nothing. All five isolation fallbacks are covered, each eye separately, missing
+  blendshapes, non-finite matrices, and yaw at both signs of the limit.
+- **Both non-success states per gate.** For every required gate, `False` and `None` are each
+  exercised and every dependent measurement asserted unavailable.
+- **Three kinds of test, kept distinct.** Stubbed raw model outputs prove the production gates are
+  called and propagated (wiring). The four reference numbers are regression targets, not
+  anatomical ground truth (numerical). Empirical accuracy is the calibration stage's job. Enough
+  raw output is retained to recompute the cheek patches; old final JSON cannot establish the new
+  gate computation.
+- **Downstream refusal.** One solver/CLI test proves an unavailable measurement stays unusable:
+  the plan reports *cannot solve with available measurements* naming the rule.
+- Coordinates are EXIF-normalized before any bound check, clip, or integer conversion, and each
+  gate record is bound to its image and run so evidence cannot be reused across photos.
 
 ## Repo
 
@@ -324,6 +531,98 @@ Schengen has **no EU-level numeric spec**: Visa Code Art. 13(4) defers to ICAO D
 (Its PDF metadata shows a 2003 QuarkXPress file authored for what appears to be the UK Passport
 Service.) The widely quoted "35×45 mm, 600×750 px, 300 DPI" figure set is unsupported by any EU
 source. Member-state guidance ships as clearly-labelled optional overlays.
+
+## Calibration beyond one subject
+
+Every threshold is calibrated on one adult male with a beard and light skin. The signal most at
+risk is the eye-region brightness ratio: its denominator is skin luminance, which varies strongly
+with skin tone, while sclera brightness varies much less — so the ratio is predicted to run
+*higher* on darker skin, making sunglasses *less* likely to be flagged. That fails in the unsafe
+direction, and it is a testable prediction, not a worry.
+
+Surveyed 2026-09-06. Use in this order:
+
+1. **MST-E** (Google/TONL) — 19 consented subjects spanning the full Monk scale, each shot under
+   varied lighting and pose, which is the confound to separate — verify the actual crossing of
+   lighting, pose and accessories in the supplied images before calling the factors independent.
+   Direct download. Its grant is **research or human-annotator-training use, ML training
+   prohibited** — record that exact grant, not "CC BY" inherited from the scale. Running a fixed
+   algorithm to characterize a bias is research evaluation; tuning a shipped threshold on it is a
+   further question, stated in the fixture README rather than assumed. Nineteen subjects is a
+   *pilot*: enough to expose a large monotonic trend, not to bound subgroup error. Analyse at
+   subject level (repeated photos are within-person variation, not more people), inspect within
+   lighting condition, split development and evaluation by subject, and allow "inconclusive".
+2. **Chicago Face Database** — studio, frontal, neutral, uniform background, 2444×1718: the
+   closest public analogue to a passport photo, across self-identified race and gender, with a
+   *measured median face luminance* per subject to regress the cheek term against. Happy-
+   expression subsets calibrate the smile flag. Licence forbids publishing "materials" and
+   facial-recognition use; derived scalars are neither, but **get that in writing from the
+   Center for Decision Research before committing fixtures**.
+3. **ONOT** — ~960k synthetic ICAO-compliant mugshots, CC BY-NC. Geometry regression only. It is
+   compliant by construction, so it contains none of the failure modes, and generative models are
+   documented to lighten non-white skin, so it must not calibrate any brightness or glare
+   threshold.
+
+Do not use: CelebA (its licence attaches non-commercial terms to *derived data* by name);
+BUPT-Balancedface and DiveFace (built on retracted MS-Celeb-1M and MegaFace); UTKFace, LFW, FFHQ,
+CASIA-WebFace (scraped without consent — indefensible for a tool that handles identity photos).
+
+**We have not identified a dataset** with consented, passport-framed photographs across skin tones
+in the *matched* conditions — sunglasses on and off, glare and no glare, eyes shadowed, eyes closed.
+MST-E is described as including glasses and masks, so inventory it before asserting absence. Those
+matched conditions are exactly the advisory thresholds that most need demographic validation, and
+the answer is 15–25 consenting volunteers spanning the Monk scale, same phone, same lighting, the
+same posed set already shot once. Consent is tiered to the artefact: local evaluation, public
+scalar fixtures, public portraits, and commercial reuse are separate permissions, and taking part
+never silently implies the later ones.
+
+**Calibration includes the abstentions.** Measuring the ratio only where 1b declares it available
+would remove the very sunglasses-on-dark-skin failures under investigation. Record numerator,
+denominator, patch locations, human patch-validity labels, and every gate failure; report
+availability alongside false flags and missed occlusions; analyse the eye and cheek terms
+*separately* — a sunglasses patch measures lenses and reflections, so the direction-of-error
+hypothesis is conditional on numerator behaviour, not settled by sclera brightness. Regressing the
+ratio against a quantity close to its own denominator (CFD's face luminance) shows association, not
+mechanism.
+
+**The cheek-patch definition is finished before recalibration begins**: landmark anchors, offsets,
+dimensions, clipping policy, per-eye treatment, aggregation, colour space, luminance computation,
+minimum usable denominator. Each eye satisfies its own visibility condition; averaging must not let
+one clear eye hide the other's failure. The recalibration then *reports whether a usable separation
+remains*. A more defensible definition is allowed to invalidate the old heuristic; if it does, the
+gate stays `None` rather than being tuned until eleven examples separate.
+
+Fixtures derived from restricted sources keep *that source's* actual terms, not a blanket CC BY-NC,
+and live in an optional evaluation separate from the default, commercially-usable test suite.
+
+Related prior work: Kabbani et al., *Demographic Variability in Face Image Quality Measures*
+(arXiv 2501.07898), evaluated the ISO/IEC 29794-5 measures across skin tone and found material
+variation in two — **dynamic range and luminance mean**. That supports investigating a luminance
+ratio; it does not test our ratio or the sunglasses false-negative direction, which remain to be
+established. Their method also discards images where no face is detected, which our availability
+reporting must not.
+
+This is a stage of its own after 1b, not part of it.
+
+## Review discipline, as actually applied to Stage 1
+
+Recorded because it is the second failure of that stage and it is not in the working rules'
+vocabulary yet.
+
+The rule is two passes, with pass two as the decision. Stage 1 ran six, with the cap overridden
+twice. The tell was visible by pass two and was misread as progress: **every finding after pass
+one was the same class** — a value reported as measured under an unmet precondition — in a new
+location each time. A repeated *class* of finding is the signal that the design is wrong; fixing
+the instances is what keeps the loop alive. The wrapper's three-pass cap is the backstop for
+exactly that judgement, and it fired, and it was overridden. Next time the backstop fires, the
+answer is the reflection above, not `--override-cap`.
+
+Two mechanisms follow, one in this repo and one not:
+
+- In this repo, the registry test under Measurement turns the design lesson into something that
+  fails at commit time rather than at review time.
+- The process lesson cannot be mechanized here; it lives in the wrapper's cap, which already
+  exists. The commitment is to lean on it.
 
 ## Explicitly out of scope for v1
 
