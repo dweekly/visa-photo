@@ -372,6 +372,11 @@ def main(argv: list[str] | None = None) -> int:
                 facts = file_facts(args.out, out_source.native.size)
                 validation = validate(profile, facts, out_measurements, out_preflight,
                                       predict(profile, plan, measurements))
+                # The output's own face gate, as the input's is checked above: a written file
+                # in which no face was found is an unmeasured output, not an incomplete pass.
+                out_face = out_measurements.gate_record["face_detected_one"]
+                if out_face.satisfied is not True:
+                    validation_error = f"the written file could not be measured: {out_face.detail}"
             except MeasurementError as exc:
                 validation_error = f"the written file could not be measured: {exc}"
 
@@ -380,8 +385,8 @@ def main(argv: list[str] | None = None) -> int:
     report["encode"] = encoded.to_dict() if encoded else None
     if validation is not None:
         report["validation"] = validation.to_dict()
-    elif validation_error is not None:
-        report["validation"] = {"error": validation_error}
+    if validation_error is not None:
+        report["validation"] = {**(report["validation"] or {}), "error": validation_error}
         report["error"] = validation_error
 
     if args.json:
@@ -394,7 +399,7 @@ def main(argv: list[str] | None = None) -> int:
             _render_history(rendered, encoded)
         if validation is not None:
             _render_validation(validation)
-        elif validation_error is not None:
+        if validation_error is not None:
             print(f"\nvalidation: {validation_error}")
 
     # The report is emitted in every case so a caller can see what was established; the exit

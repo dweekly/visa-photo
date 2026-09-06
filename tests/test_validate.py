@@ -11,6 +11,11 @@ import pytest
 from PIL import Image
 
 from tests.test_regressions import H, W, landmarks, matte, run
+from visaphoto.backends.landmarks import IDX_CHIN, IDX_IRIS_LEFT, IDX_IRIS_RIGHT
+
+
+def lm_index(name):
+    return {"left": IDX_IRIS_LEFT, "right": IDX_IRIS_RIGHT, "chin": IDX_CHIN}[name]
 from tests.test_render import (
     FAITHFUL, feasible_plan, flat, output_fits, stub_fits, textured, write_photo,
 )
@@ -363,6 +368,34 @@ class TestCli:
         assert code == cli.EXIT_CANNOT_MEASURE
         assert r["encode"]["status"] == "done" and out.exists()
         assert "written file could not be measured" in r["validation"]["error"] and r["error"]
+
+    def test_an_advisory_warning_on_the_written_file_is_exit_1_in_both_output_modes(self, tmp_path, monkeypatch, capsys):
+        """A smile on the output: text mode must print the warning, not crash on it."""
+        from tests.test_regressions import NEUTRAL
+
+        photo = write_photo(tmp_path / "p.jpg", textured(600, 800, sigma=20))
+        plan = feasible_plan()
+        lm, m = output_fits(plan)
+        smiling = landmarks(left=lm.points[lm_index("left")], right=lm.points[lm_index("right")],
+                            chin=lm.points[lm_index("chin")],
+                            blendshapes={**NEUTRAL, "mouthSmileLeft": 0.9, "mouthSmileRight": 0.9})
+        stub_fits(monkeypatch, output=(smiling, m))
+        out = tmp_path / "o.jpg"
+        code, text = run_cli([str(photo), "--spec", "cn_visa_digital", "--out", str(out), "--model", str(photo)], capsys)
+        assert code == cli.EXIT_WARNINGS
+        assert "advisory warnings on this file: expression_neutral" in text
+        code, r = run_cli([str(photo), "--spec", "cn_visa_digital", "--out", str(out), "--model", str(photo), "--json"], capsys)
+        assert code == cli.EXIT_WARNINGS and r["validation"]["aggregate"] == "passes_implemented_checks"
+
+    def test_a_written_file_with_no_face_is_an_unmeasured_output_exit_2(self, tmp_path, monkeypatch, capsys):
+        photo = write_photo(tmp_path / "p.jpg", textured(600, 800, sigma=20))
+        stub_fits(monkeypatch, output=(landmarks(faces=0), output_fits(feasible_plan())[1]))
+        out = tmp_path / "o.jpg"
+        code, r = run_cli([str(photo), "--spec", "cn_visa_digital", "--out", str(out), "--model", str(photo), "--json"], capsys)
+        assert code == cli.EXIT_CANNOT_MEASURE
+        assert r["encode"]["status"] == "done" and out.exists()
+        assert "written file could not be measured" in r["validation"]["error"] and r["error"]
+        assert r["validation"]["aggregate"] == "incomplete"  # the validation that was possible is kept
 
     def test_capabilities_json_keeps_its_own_schema(self, capsys):
         code, r = run_cli(["--capabilities", "--json"], capsys)

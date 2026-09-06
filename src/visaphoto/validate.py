@@ -180,6 +180,7 @@ class Validation:
     measurements: MeasurementSet
     preflight: Any
     warnings: list[str] = field(default_factory=list)
+    """Keys of the advisory requirements that warned on this file."""
 
     @property
     def fails(self) -> bool:
@@ -299,5 +300,5 @@ def validate(profile: Profile, facts: FileFacts, measurements: MeasurementSet, p
         policies=dict(profile.operations),
         uncertainty="delta" if predicted is not None else "none",
         measurements=measurements, preflight=preflight,
-        warnings=list(preflight.warnings) if preflight else [],
+        warnings=[f.requirement.key for f in preflight.warnings] if preflight else [],
     )
