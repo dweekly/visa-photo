@@ -49,6 +49,9 @@ class TestIntervalVerdict:
 
     def test_strict_bounds_exclude_their_endpoint(self):
         assert interval_verdict(60, 0, 60, None, lo_strict=True) is Verdict.FAIL
+        assert interval_verdict(60 + 1e-12, 0, 60, None, lo_strict=True) is Verdict.FAIL  # float noise is on the bound
+        assert interval_verdict(60 + 1e-6, 0, 60, None, lo_strict=True) is Verdict.PASS
+        assert interval_verdict(70 + 1e-12, 0, 10, 70) is Verdict.PASS  # and within it of an inclusive bound is met
         assert interval_verdict(60.01, 0, 60, None, lo_strict=True) is Verdict.PASS
         assert interval_verdict(59.99, 0, 60, None, lo_strict=True) is Verdict.FAIL
         assert interval_verdict(60.5, 0.5, 60, None, lo_strict=True) is Verdict.INDETERMINATE

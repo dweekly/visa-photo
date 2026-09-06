@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .geometry import EPS
 from .measurements import MeasurementSet, Status
 from .profiles import OutputSize, Profile, ProfileError, build_constraints
 from .requirements import Check, for_jurisdiction
@@ -117,15 +118,17 @@ def interval_verdict(
 
     Inside ⇒ pass; disjoint ⇒ fail; anything else ⇒ indeterminate. A strict bound excludes
     its endpoint, so an interval touching it is not inside and a value equal to it, with no
-    interval, is outside.
+    interval, is outside. Comparisons use the solver's numerical tolerance (`geometry.EPS`,
+    1e-9): a value within it of a strict bound is on the bound, not past it. That is float
+    noise, not a pixel tolerance.
     """
     a, b = x - half_width, x + half_width
 
     def above_lo(v: float) -> bool:
-        return True if lo is None else (v > lo if lo_strict else v >= lo)
+        return True if lo is None else (v > lo + EPS if lo_strict else v >= lo - EPS)
 
     def below_hi(v: float) -> bool:
-        return True if hi is None else (v < hi if hi_strict else v <= hi)
+        return True if hi is None else (v < hi - EPS if hi_strict else v <= hi + EPS)
 
     if above_lo(a) and below_hi(b):
         return Verdict.PASS
