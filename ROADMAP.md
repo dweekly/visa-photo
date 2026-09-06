@@ -33,7 +33,8 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   resample through the float crop box; a bounded JPEG quality search that measures the written
   file and reports `no_encoding_satisfies` rather than padding or over-degrading; `--out`,
   the operation history in text and JSON, exit 5 when a crop was found but no file could be
-  written. Under review.
+  written. Three review passes taken; one open finding holds the merge — see
+  [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md) → Open finding.
 - **Stage 4 — validator and report contract.** Per-criterion pass / fail / indeterminate /
   not-evaluated, each with a reason, measured from the written file.
 - **Stage 5 — seeded profiles and docs.** `cn_visa_digital`, `cn_visa_paper`, `us_visa_digital`,

@@ -89,6 +89,31 @@ this after the fact; the history is the only record.
   path and differs from round-then-resize by measurable pixels — asserted, so the shortcut is
   never quietly reintroduced.
 
+## Open finding — holds the merge
+
+Review pass three (423c36d) reproduced a bypass of the isolation gate in `subject_alpha`. The
+selected solid component is extended into its soft edge by labelling connectivity over *all
+nonzero alpha*; a faint bridge (alpha 1) between the subject and a rejected solid fragment
+reconnects them, so the fragment is composited while the history reports "composited the
+isolated subject". On the synthetic fixture: `alpha[100:130, 70:100] = 255;
+alpha[115, 100:150] = 1` gives the gate "component 2 of 2 selected", `subject_alpha[115, 85]
+== 255`, and output pixel (30, 50) grey.
+
+**Candidate fix, spiked 2026-09-06, not on the branch:** attribute every nonzero-alpha pixel to
+the component of its *nearest solid pixel* (`scipy.ndimage.distance_transform_edt(~solid,
+return_indices=True)`) and keep those attributed to the selected component. No radius constant
+and no connectivity through bridges. On the reviewer's fixture the fragment and its soft halo
+are 0, the subject's soft edge is kept, and the bridge splits at its midpoint (the subject's
+half kept at alpha 1). On the reference photo's 2316×3088 matte it costs 0.29 s and drops
+15,390 of 3.56 M nonzero pixels across the seven rejected components.
+
+**Why it is held rather than fixed here:** three review passes were taken, and the findings of
+passes two and three were each in code written for the previous pass's fix (the print writer;
+the soft-edge extension). That is the not-converging signature the review rule names, and the
+pass cap is its backstop. Landing the fix and its regressions (bridged fragment, halo, split
+bridge) needs a receipt at the new head, which is a fourth run — a decision for the author of
+the rule, not for the branch.
+
 ## Sequence
 
 - [x] This document.
@@ -98,3 +123,4 @@ this after the fact; the history is the only record.
 - [x] `encode.py`: bounded candidate search measuring written bytes; `no_encoding_satisfies`.
 - [x] `--out` on the CLI; operation history in text and JSON.
 - [x] Tests as above.
+- [ ] Open finding above resolved, with its regressions; receipt at HEAD.
