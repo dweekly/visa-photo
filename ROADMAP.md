@@ -25,8 +25,15 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
 - **Calibration beyond one subject.** MST-E, then the Chicago Face Database, then consenting
   volunteers for the matched failure conditions no dataset covers. Sources, terms and the analysis
   design are in [docs/PLAN.md](docs/PLAN.md) → Calibration. After Stage 1b.
-- **Stage 3 — render and encode.** Crop, background replacement *where the channel permits it*,
-  resize, and a bounded encoder search against format, colour-space and byte-band constraints.
+- **Stage 3 — render and encode.** In progress on PR #4, stacked on #3. Landed on the branch:
+  `render()` with operations gated the way measurements are — background replacement only where
+  the channel's policy allows it (`unresolved` counts as prohibited unless
+  `--allow-unresolved-operations`, and the history records the opt-in), the matte isolated the
+  face, and the subject is clear of the crop's top and sides; crop and resize as one Lanczos
+  resample through the float crop box; a bounded JPEG quality search that measures the written
+  file and reports `no_encoding_satisfies` rather than padding or over-degrading; `--out`,
+  the operation history in text and JSON, exit 5 when a crop was found but no file could be
+  written. Under review.
 - **Stage 4 — validator and report contract.** Per-criterion pass / fail / indeterminate /
   not-evaluated, each with a reason, measured from the written file.
 - **Stage 5 — seeded profiles and docs.** `cn_visa_digital`, `cn_visa_paper`, `us_visa_digital`,

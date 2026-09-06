@@ -4,7 +4,20 @@ User-facing changes, newest first. Cited from [README.md](README.md).
 
 ## Unreleased
 
-Nothing released yet. The project is at Stage 0 of 5; see [ROADMAP.md](ROADMAP.md).
+Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
+
+### Added (unreleased, Stage 3)
+- `--out FILE` renders the planned crop and writes it (requires `--spec`). Crop and resize are a
+  single uniform resample; the output is 8-bit sRGB JPEG, 4:4:4, no metadata, at the highest
+  listed quality whose written size falls inside the destination's byte band. If no listed
+  quality fits, the file is not written and the report says so with the sizes tried (exit 5).
+- Background replacement is performed only where the destination's rules allow it. A destination
+  whose rules do not address editing (China) gets it only with `--allow-unresolved-operations`,
+  and the report records that it was an opt-in; a destination that prohibits it (NZ) never does.
+  It is also refused, whatever the policy, when the matte did not isolate the face or the subject
+  crosses the crop's top or sides.
+- The report carries an operation history: each operation, its status, the gates it consulted,
+  and the parameters used (crop box, scale, quality, bytes).
 
 ### Changed (unreleased, Stage 1b)
 - A measurement is now unavailable unless every gate it declares is affirmatively true. Gates
