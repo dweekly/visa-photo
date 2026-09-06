@@ -16,8 +16,8 @@ Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 - `--validate` checks a photo you already have against `--spec`, at its own size, with no crop.
 - `--spec` now selects the destination's advisories (China's, for `cn_visa_digital`) without
   `--for`; a conflicting `--for` is refused.
-- China's "> 60 pixels" and "> 256 pixels" are strict: a value exactly on the bound fails, and the
-  solver refuses a crop whose only feasible point sits on one.
+- China's "> 60 pixels" and "> 256 pixels" are strict: a value exactly on the bound fails
+  validation.
 - `--json` emits one envelope for every photo run - `report_version`, `tool`, `error`, then each
   stage, `null` when not reached - documented under "The report" in the README.
 

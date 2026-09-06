@@ -57,11 +57,14 @@ passes, without cropping it. The same validator answers that.
    *Check:* value 69.5 against `[10, 70]`: prediction 68.5 ⇒ `indeterminate`; prediction 69.4
    ⇒ `pass`; no prediction ⇒ `pass`. Prediction 40, observation 120 ⇒ `indeterminate`.
 5. **Strict bounds are strict.** *(review)* China's sheet says inter-eye distance "> 60 pixels"
-   and eye line "> 256 pixels"; the rule and constraint schema record inclusivity, the
-   validator fails a value equal to an exclusive bound, and the solver refuses a solution whose
-   only feasible point sits on one. No pixel tolerance is added to approximate ">". *Check:*
-   equality on each strict bound fails; 60.01 passes; an interval touching an exclusive
-   endpoint is `indeterminate`.
+   and eye line "> 256 pixels"; the rule and constraint schema record inclusivity and the
+   validator fails a value equal to an exclusive bound. The solver does not refuse such a
+   point: its optimum can land on a bound while crops with slack exist, when a preference is
+   unsatisfiable (a Stage 2 objective defect, on ROADMAP), so a refusal there would be false.
+   No pixel tolerance is added to approximate ">". *Check:* equality on each strict bound
+   fails; 60.01 passes; an interval touching an exclusive endpoint is `indeterminate`; a face
+   whose crop is pinned to a strict bound is solved and then failed by the validator; the
+   review's reproduction (a feasible face with an unsatisfiable preference) is solved.
 6. **Encoding is checked from the file, in the file's own frame.** *(review)* Format, mode, bits
    per channel and *stored* dimensions are read from the file before any conversion; the
    orientation-normalized dimensions measurement used are recorded beside them, and when the
@@ -139,8 +142,7 @@ passes, without cropping it. The same validator answers that.
 **Schema changes, small:** `Rule` and `Constraint` gain `lo_strict` / `hi_strict` (default
 False); China's `inter_eye_distance` and `eye_line_from_bottom` set `lo_strict`. `Profile` gains
 `jurisdiction`. `Encoding` gains `size_readings: tuple[SizeReading, ...]` (name, min, max) and
-derives `min_bytes` / `max_bytes` as their intersection for the encoder. `solve()` reports
-`Infeasible` naming the rule when the chosen point lies on a strict bound within `EPS`.
+derives `min_bytes` / `max_bytes` as their intersection for the encoder.
 
 **`validate.py`**
 
@@ -175,10 +177,12 @@ derives `min_bytes` / `max_bytes` as their intersection for the encoder. `solve(
 
 ## Declined or adjusted from the review
 
-- *Honour strictness in solver solution acceptance* is taken in its smallest form: the solver
-  still maximizes slack over closed intervals — its optimum is interior whenever the feasible
-  set has positive width — and refuses only the case where the chosen point lies on a strict
-  bound. A strict-inequality feasibility calculus for a single-point feasible set is not built.
+- *Honour strictness in solver solution acceptance* is not taken. A refusal of the chosen point
+  when it lies on a strict bound was built and reviewed out: the solver's optimum lands on a
+  bound with feasible crops elsewhere whenever the centring preference is unsatisfiable (its
+  negative slack dominates the min-slack objective), so the refusal called feasible faces
+  infeasible. Strictness is enforced where the value is known — the validator — and the
+  objective defect is filed under Stage 2 on ROADMAP.
 - *Return structured unapplied information from `build_constraints`* is met by the validator
   looking the rule's measurement up on the measurement set, which already carries the status
   and both gate lists; the planner's rendered strings are unchanged.
@@ -189,34 +193,6 @@ The checks under "What must be true", each a test from a file on disk with only 
 stubbed, plus the real run: the reference photo through `--out`, its validation block in the PR,
 and the written file through `--validate` giving the same verdicts.
 
-## Open finding — holds the merge
-
-Review pass three (47296f6) reproduced a false refusal from the solver-side strict-bound check
-added on this branch. With `reference_measurements(head_width_silhouette=200,
-inter_eye_distance=100, matte_top_row=1000, eye_line_y=1200, chin_landmark_y=1400,
-eye_mid_x=150)`, the digital profile returns `strict_bound` — "the only feasible value is 256" —
-while `(s=1.02, u=1010, v=0)` satisfies every published rule with the eye line at 258.
-
-What the reproduction shows underneath: without the refusal the solver chooses scale 1.03,
-where the vertical placement is pinned to one point (crown gap exactly 10, eye line exactly
-256, `min_slack` 0.0000), although scale 1.02 leaves positive slack. The centring preference
-cannot be satisfied for this face (the eye midpoint is at x=150, so containment pins the crop's
-left edge and the preference's slack is −0.136 whatever the crop), and that negative slack
-dominates the min-slack objective at every point, leaving the search blind to the requirements'
-slack. That is a Stage 2 objective defect — a preference was meant to be honoured where the
-rules leave room, never to decide between crops that satisfy the rules — and strictness exposed
-it: the refusal then reported the pinned optimum as the only feasible point.
-
-**The change this branch should make, not yet made:** remove the solver-side refusal. The
-validator already fails a value on a strict bound, so nothing false can pass; the cost is that
-this input would produce a file the validator then fails (eye line 256) while a passing crop
-exists. **The change that belongs to Stage 2, filed on ROADMAP:** when a preference cannot be
-satisfied, it must not take part in the minimum — maximize the requirements' slack first and
-use preferences only to choose among equally good crops.
-
-Landing either needs a receipt at the new head, which is a fourth run — a decision for the
-author of the review rule, not for the branch.
-
 ## Sequence
 
 - [x] This document, reviewed once by Codex (GPT-6 Astra, high); ROADMAP entries.
@@ -225,4 +201,6 @@ author of the review rule, not for the branch.
 - [x] CLI: `--validate`, post-write validation, exit table, report envelope; README report
       section and status line.
 - [x] Tests as above; real run.
-- [ ] Open finding above resolved; receipt at HEAD; merge.
+- [x] The solver-side strict refusal removed after review pass three; the objective defect it
+      exposed filed on ROADMAP.
+- [ ] Receipt at HEAD; merge.

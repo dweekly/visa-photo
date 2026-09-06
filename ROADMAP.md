@@ -32,8 +32,7 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   fail / indeterminate / not-evaluated from the written file's own measurements, with the
   plan's prediction and the delta beside each; `--validate` for a file you already have; both
   readings of KB; strict bounds; a report envelope with a version. Plan in
-  [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md). Three review passes taken; one open
-  finding holds the merge — see the plan's "Open finding".
+  [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md).
 - **Solver objective when a preference is unsatisfiable** (Stage 2 follow-up). The centring
   preference's slack takes part in the min-slack objective; when the preference cannot be met
   its negative slack dominates the minimum at every crop, and the search no longer sees the

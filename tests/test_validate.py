@@ -21,7 +21,6 @@ from tests.test_render import (
 )
 from visaphoto import cli
 from visaphoto.evaluate import measure_all
-from visaphoto.geometry import Infeasible
 from visaphoto.plan import make_plan
 from visaphoto.profiles import CN_VISA_DIGITAL, OutputSize, build_constraints
 from visaphoto.validate import (
@@ -71,10 +70,11 @@ class TestStrictBoundsInTheSchema:
         by_rule = {c.rule: c for c in constraints}
         assert by_rule["inter_eye_distance"].lo_strict and by_rule["eye_line_from_bottom"].lo_strict
 
-    def test_solver_refuses_a_point_on_a_strict_bound(self):
+    def test_a_crop_on_a_strict_bound_is_solved_and_then_failed_by_the_validator(self):
         """Through the real profile: a head width of 300 px allows scales up to 219/300, and an
         inter-eye distance of exactly 60/(219/300) needs at least that scale to reach 60 px. The
-        feasible set is one point, and at it the IED is exactly 60 - on the strict bound."""
+        feasible set is one point, at which the IED is exactly 60. The solver does not refuse it
+        (see below); the validator fails it, because the sheet says "> 60"."""
         from tests.test_plan import reference_measurements
 
         s_max = 219.0 / 300.0
@@ -82,10 +82,26 @@ class TestStrictBoundsInTheSchema:
                                    eye_line_y=1200.0, matte_top_row=1000.0,
                                    chin_landmark_y=1800.0, eye_mid_x=1158.0)
         plan = make_plan(CN_VISA_DIGITAL, m)
-        assert not plan.feasible
-        out = plan.attempts[0].outcome
-        assert isinstance(out, Infeasible) and out.reason == "strict_bound", out
-        assert "inter_eye_distance" in out.detail and "> 60" in out.detail
+        assert plan.feasible
+        predicted = predict(CN_VISA_DIGITAL, plan, m)
+        assert abs(predicted["inter_eye_distance"] - 60.0) < 1e-6
+        assert interval_verdict(predicted["inter_eye_distance"], 0.0, 60.0, None, lo_strict=True) is Verdict.FAIL
+
+    def test_solver_does_not_refuse_a_feasible_face_whose_optimum_lands_on_a_strict_bound(self):
+        """Review reproduction. The centring preference cannot be met for this face and its
+        negative slack dominates the objective, so the solver picks a zero-slack crop (crown gap
+        10, eye line 256) although scale 1.02 gives eye line 258. A solver-side strict refusal
+        called this infeasible; it is not. The objective defect is on ROADMAP under "Solver
+        objective when a preference is unsatisfiable"; until it is fixed this asserts only that
+        the crop is found."""
+        from tests.test_plan import reference_measurements
+
+        m = reference_measurements(head_width_silhouette=200.0, inter_eye_distance=100.0,
+                                   matte_top_row=1000.0, eye_line_y=1200.0,
+                                   chin_landmark_y=1400.0, eye_mid_x=150.0)
+        plan = make_plan(CN_VISA_DIGITAL, m)
+        assert plan.feasible, plan.attempts[0].outcome
+        assert predict(CN_VISA_DIGITAL, plan, m)["eye_line_from_bottom"] >= 256.0
 
     def test_the_same_point_just_above_the_bound_solves(self):
         from tests.test_plan import reference_measurements
