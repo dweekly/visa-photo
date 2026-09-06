@@ -37,13 +37,21 @@ history records that it was an opt-in. NZeTA is `prohibited` outright and no fla
   takes a float box, so the crop origin and scale from the plan are applied in a single uniform
   resample. Rounding the crop to integers and then resizing independently introduces a small
   non-uniform scale, which the plan forbids.
+- **Colour comes first:** output is 8-bit sRGB. A source with an embedded profile (Display P3 on
+  iPhone photographs) is converted to sRGB in source space, relative colorimetric, before any
+  other operation; a source with none, or with one LittleCMS cannot read, is assumed sRGB and the
+  assumption — and which case it was — is recorded in the history. No colour *adjustment* is
+  performed (a separate operation, `unresolved` everywhere seeded).
 - **Background replacement happens in source space, before the resample**, by compositing the
   matte over the profile's background colour. Compositing after resampling puts a resampled
   alpha edge against a hard fill.
-- **Colour:** output is 8-bit sRGB. A source with an embedded profile is converted; a source with
-  none is assumed sRGB and the assumption is recorded in the history. No colour *adjustment* is
-  performed (a separate operation, `unresolved` everywhere seeded).
-- **Metadata:** stripped. Orientation is already normalized at load; the output carries none.
+- **Metadata:** none. The encoder is handed a fresh image built from pixels alone, so nothing in
+  the source's `info` (a COM comment, EXIF, the ICC profile) can be copied into the file.
+  Orientation is already normalized at load.
+- **The destination is never destroyed by a failed search.** Candidates are written to a
+  temporary file beside `--out` and replace it only when one fits; `--out` naming the input
+  photo is refused outright. A destination that cannot be written is a reported result
+  (`write_failed`, exit 5) with the report still emitted, not a traceback.
 - **Encoding search:** JPEG, 4:4:4 (no chroma subsampling — a 354-px-wide face does not have
   chroma to spare), quality candidates `(98, 96, 94, 92, 90, 88, 85, 82, 80, 75, 70)`. Encode each,
   measure the **bytes of the written file**, keep the highest quality inside the byte band. Below

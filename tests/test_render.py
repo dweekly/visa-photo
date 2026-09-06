@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import struct
 from dataclasses import replace
 
 import numpy as np
 from PIL import Image, JpegImagePlugin
 
 from tests.test_regressions import landmarks, matte, pixels, run
-from visaphoto.encode import JPEG_QUALITIES, encode
+from visaphoto.encode import JPEG_QUALITIES, encode, write_unconstrained
 from visaphoto.plan import make_plan
 from visaphoto.profiles import CN_VISA_DIGITAL, CN_VISA_PAPER, Encoding
 from visaphoto.render import render
@@ -50,6 +51,60 @@ def op(result, name):
     return next(h for h in result.history if h.name == name)
 
 
+# --- a synthetic ICC v2 matrix/TRC profile, so colour tests need no vendor binary ------------
+# Layout per ICC.1:2001-04 (v2): 128-byte header, tag table, tag data. LittleCMS accepts it
+# (checked on Pillow 12.3.0). The sRGB colorants below are the D50-adapted values every sRGB
+# profile carries; swapping the red and green colorants makes a profile under which a
+# red-dominant pixel is, in truth, green - which a correct conversion must reveal.
+_D50 = (0.9642, 1.0, 0.8249)
+SRGB_R, SRGB_G, SRGB_B = (0.4361, 0.2225, 0.0139), (0.3851, 0.7169, 0.0971), (0.1431, 0.0606, 0.7141)
+
+
+def _s15f16(v):
+    return struct.pack(">i", int(round(v * 65536)))
+
+
+def _xyz(x, y, z):
+    return b"XYZ " + b"\0" * 4 + _s15f16(x) + _s15f16(y) + _s15f16(z)
+
+
+def _curv(gamma):
+    return b"curv" + b"\0" * 4 + struct.pack(">I", 1) + struct.pack(">H", int(round(gamma * 256)))
+
+
+def _desc(text):
+    a = text.encode("ascii") + b"\0"
+    return (b"desc" + b"\0" * 4 + struct.pack(">I", len(a)) + a + struct.pack(">II", 0, 0)
+            + struct.pack(">HB", 0, 0) + b"\0" * 67)
+
+
+def icc_profile(description, r=SRGB_R, g=SRGB_G, b=SRGB_B, gamma=2.2) -> bytes:
+    tags = [(b"desc", _desc(description)), (b"cprt", b"text" + b"\0" * 4 + b"synthetic\0"),
+            (b"wtpt", _xyz(*_D50)), (b"rXYZ", _xyz(*r)), (b"gXYZ", _xyz(*g)), (b"bXYZ", _xyz(*b)),
+            (b"rTRC", _curv(gamma)), (b"gTRC", _curv(gamma)), (b"bTRC", _curv(gamma))]
+    table, body = b"", b""
+    first = 128 + 4 + 12 * len(tags)
+    for sig, data in tags:
+        table += sig + struct.pack(">II", first + len(body), len(data))
+        body += data + b"\0" * ((-len(data)) % 4)
+    header = (struct.pack(">I", first + len(body)) + b"\0" * 4 + struct.pack(">I", 0x02100000)
+              + b"mntr" + b"RGB " + b"XYZ " + b"\0" * 12 + b"acsp" + b"\0" * 28
+              + _s15f16(_D50[0]) + _s15f16(_D50[1]) + _s15f16(_D50[2]) + b"\0" * 48)
+    assert len(header) == 128
+    return header + struct.pack(">I", len(tags)) + table + body
+
+
+SWAPPED_RG = icc_profile("synthetic red/green swapped", r=SRGB_G, g=SRGB_R)
+
+
+def tinted(w=600, h=800, rgb=(200, 50, 50), profile=None):
+    """A flat image of one colour, optionally tagged with an ICC profile."""
+    im = Image.new("RGB", (w, h), rgb)
+    if profile is not None:
+        im.info["icc_profile"] = profile
+    return im
+
+
 class TestCropResize:
     def test_a_feasible_plan_renders_at_the_chosen_size(self):
         m = measured()
@@ -80,11 +135,48 @@ class TestCropResize:
         diff = np.abs(np.asarray(out.image, dtype=int) - np.asarray(shortcut, dtype=int))
         assert diff.max() > 0
 
-    def test_history_records_the_colour_assumption(self):
+    def test_operations_run_in_the_documented_order(self):
         m = measured()
         out = render(image_for(m), m, make_plan(CN_VISA_DIGITAL, m), CN_VISA_DIGITAL)
-        assert op(out, "colour_convert").status == "skipped"
-        assert "sRGB is assumed" in op(out, "colour_convert").detail
+        assert [h.name for h in out.history] == ["colour_convert", "replace_background", "crop_resize"]
+
+
+class TestColourConvert:
+    def test_no_profile_is_recorded_as_an_assumption(self):
+        m = measured()
+        out = render(image_for(m), m, make_plan(CN_VISA_DIGITAL, m), CN_VISA_DIGITAL)
+        rec = op(out, "colour_convert")
+        assert rec.status == "skipped" and "assumed to be sRGB" in rec.detail
+        assert rec.gates == (("embedded_colour_profile", False, "none in the file"),)
+
+    def test_an_embedded_profile_is_converted_not_relabelled(self):
+        """Under a profile whose red and green colorants are swapped, the source's (200, 50, 50)
+        is a green colour. Keeping the channel values and dropping the profile would submit a
+        red photo of a green subject."""
+        m = measured()
+        plan = make_plan(CN_VISA_DIGITAL, m)
+        out = render(tinted(profile=SWAPPED_RG), m, plan, CN_VISA_DIGITAL)
+        rec = op(out, "colour_convert")
+        assert rec.status == "done" and rec.params["from"] == "synthetic red/green swapped"
+        r, g, b = out.image.getpixel((100, 100))
+        assert g > 150 and r < 100, (r, g, b)
+
+    def test_a_faithful_profile_leaves_colours_alone(self):
+        m = measured()
+        out = render(tinted(profile=icc_profile("synthetic sRGB")), m, make_plan(CN_VISA_DIGITAL, m),
+                     CN_VISA_DIGITAL)
+        assert op(out, "colour_convert").status == "done"
+        r, g, b = out.image.getpixel((100, 100))
+        assert abs(r - 200) <= 3 and abs(g - 50) <= 5 and abs(b - 50) <= 5, (r, g, b)
+
+    def test_an_unreadable_profile_is_the_no_profile_case_with_the_reason(self):
+        m = measured()
+        out = render(tinted(profile=b"not an icc profile"), m, make_plan(CN_VISA_DIGITAL, m),
+                     CN_VISA_DIGITAL)
+        rec = op(out, "colour_convert")
+        assert rec.status == "skipped" and "could not be read" in rec.detail
+        assert rec.gates[0][1] is None
+        assert out.image.getpixel((100, 100)) == (200, 50, 50)
 
 
 class TestReplaceBackground:
@@ -187,6 +279,56 @@ class TestEncode:
     def test_a_print_profile_has_no_encoding(self):
         assert CN_VISA_PAPER.encoding is None
 
+    def test_nothing_fits_leaves_an_existing_file_untouched(self, tmp_path):
+        """The search must never destroy what was at --out - which can be the applicant's only
+        copy of a photo - and then report that nothing was written."""
+        out = tmp_path / "out.jpg"
+        out.write_bytes(b"the applicant's original")
+        result = encode(Image.new("RGB", (354, 472), (128, 128, 128)), CN_VISA_DIGITAL.encoding, out)
+        assert result.status == "no_encoding_satisfies"
+        assert out.read_bytes() == b"the applicant's original"
+        assert not list(tmp_path.glob("*.part"))  # no candidate left behind
+
+    def test_a_fit_replaces_the_existing_file(self, tmp_path):
+        out = tmp_path / "out.jpg"
+        out.write_bytes(b"stale")
+        result = encode(textured(354, 472), CN_VISA_DIGITAL.encoding, out)
+        assert result.done and out.stat().st_size == result.bytes
+        assert not list(tmp_path.glob("*.part"))
+
+    def test_an_unwritable_destination_is_a_result_not_an_exception(self, tmp_path):
+        result = encode(textured(354, 472), CN_VISA_DIGITAL.encoding, tmp_path)  # a directory
+        assert result.status == "write_failed" and str(tmp_path) in result.detail
+        assert not result.done
+        assert not list(tmp_path.glob("*.part"))
+
+    def test_source_metadata_never_reaches_the_output(self, tmp_path):
+        """A comment, EXIF and an ICC profile on the source; the written file has none. This
+        goes through render() so the pixels have taken the real path from source to file."""
+        m = measured()
+        source = textured(600, 800)
+        source.info["comment"] = b"private source annotation"
+        source.info["icc_profile"] = icc_profile("synthetic sRGB")
+        exif = Image.Exif()
+        exif[0x010E] = "private image description"
+        source.info["exif"] = exif.tobytes()
+        rendered = render(source, m, make_plan(CN_VISA_DIGITAL, m), CN_VISA_DIGITAL)
+        result = encode(rendered.image, CN_VISA_DIGITAL.encoding, tmp_path / "out.jpg")
+        assert result.done
+        with Image.open(result.path) as im:
+            assert "comment" not in im.info
+            assert "icc_profile" not in im.info
+            assert not im.getexif()
+        assert b"private" not in (tmp_path / "out.jpg").read_bytes()
+
+    def test_unconstrained_write_for_a_print_profile(self, tmp_path):
+        result = write_unconstrained(textured(354, 472), tmp_path / "print.png")
+        assert result.done and result.quality is None
+        with Image.open(result.path) as im:
+            assert im.format == "PNG" and im.size == (354, 472)
+        bad = write_unconstrained(textured(354, 472), tmp_path / "print.unknownext")
+        assert bad.status == "write_failed"
+
     def test_unsupported_format_is_refused_not_guessed(self, tmp_path):
         enc = Encoding(format="png", colour="srgb_24bit", min_bytes=None, max_bytes=None, quote="q")
         result = encode(Image.new("RGB", (10, 10)), enc, tmp_path / "x.png")
@@ -211,7 +353,8 @@ class TestCli:
         assert out.exists()
         assert report["render"]["rendered"] is True
         assert report["encode"]["status"] == "done"
-        assert [h["operation"] for h in report["render"]["history"]][0] == "replace_background"
+        assert [h["operation"] for h in report["render"]["history"]] == [
+            "colour_convert", "replace_background", "crop_resize"]
         with Image.open(out) as im:
             assert im.size == (354, 472)
 
@@ -221,3 +364,27 @@ class TestCli:
         photo = tmp_path / "p.jpg"
         photo.write_bytes(b"x")
         assert cli.main([str(photo), "--out", str(tmp_path / "o.jpg")]) == cli.EXIT_USAGE
+
+    def test_out_equal_to_the_input_is_refused_before_anything_runs(self, tmp_path):
+        from visaphoto import cli
+
+        photo = tmp_path / "p.jpg"
+        photo.write_bytes(b"the original")
+        code = cli.main([str(photo), "--spec", "cn_visa_digital", "--out", str(tmp_path / "p.jpg")])
+        assert code == cli.EXIT_USAGE
+        assert photo.read_bytes() == b"the original"
+
+    def test_unwritable_out_still_emits_the_report_and_exits_5(self, monkeypatch, tmp_path, capsys):
+        from visaphoto import cli
+        from visaphoto.preflight import run as preflight_run
+
+        photo = tmp_path / "p.jpg"
+        photo.write_bytes(b"x")
+        m = measured()
+        monkeypatch.setattr(cli, "measure_photo", lambda *a, **k: (m, preflight_run(m, {}, jurisdiction="CN")))
+        monkeypatch.setattr(cli, "load_rgb", lambda p: textured(600, 800, sigma=28))
+        code = cli.main([str(photo), "--spec", "cn_visa_digital", "--out", str(tmp_path), "--json"])
+        report = json.loads(capsys.readouterr().out)
+        assert code == cli.EXIT_NOT_WRITTEN
+        assert report["render"]["rendered"] is True
+        assert report["encode"]["status"] == "write_failed"

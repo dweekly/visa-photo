@@ -5,6 +5,10 @@ the record, and a status decided from those gates - never from whether the input
 be present. A background is not replaced because a matte exists; it is replaced because the
 channel permits it, the matte isolated the face, and the subject does not cross the crop's
 top or sides. See docs/STAGE3-RENDER.md.
+
+Order: colour conversion to sRGB (in source space, so every later operation works in one
+colour space), background replacement (source space, before any resample), then crop and
+resize as one resample.
 """
 
 from __future__ import annotations
@@ -83,6 +87,42 @@ def _subject_clear_of_crop_top_and_sides(alpha, box, solid_threshold: int) -> tu
     return True, "subject clear of the crop's top and sides"
 
 
+def _convert_to_srgb(image) -> tuple[Any, OperationRecord]:
+    """Convert `image` from its embedded ICC profile to sRGB.
+
+    Phone photographs carry Display P3; writing their channel values into a JPEG with no
+    profile would change the colours on every viewer. No profile, or one LittleCMS cannot
+    read, means the source is assumed to be sRGB - and the record says which case it was.
+    Relative colorimetric intent: a display-to-display conversion keeps in-gamut colours
+    exact and clips the rest.
+    """
+    import io
+    from PIL import ImageCms
+
+    icc = image.info.get("icc_profile")
+    assumed = "the source is assumed to be sRGB and written as sRGB without a profile"
+    if not icc:
+        return image, OperationRecord(
+            "colour_convert", "skipped", f"no embedded colour profile; {assumed}",
+            (("embedded_colour_profile", False, "none in the file"),))
+    try:
+        source_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+        description = ImageCms.getProfileDescription(source_profile).strip()
+        converted = ImageCms.profileToProfile(
+            image, source_profile, ImageCms.createProfile("sRGB"),
+            renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC, outputMode="RGB")
+    except (ImageCms.PyCMSError, OSError) as e:  # LittleCMS raises OSError on bytes it cannot parse
+        return image, OperationRecord(
+            "colour_convert", "skipped",
+            f"the embedded colour profile could not be read ({e}); {assumed}",
+            (("embedded_colour_profile", None, f"{len(icc)} bytes, unreadable"),))
+    return converted, OperationRecord(
+        "colour_convert", "done",
+        f"converted from '{description}' to sRGB, relative colorimetric",
+        (("embedded_colour_profile", True, description),),
+        {"from": description, "to": "sRGB", "intent": "relative_colorimetric"})
+
+
 def render(
     image_rgb, measurements: MeasurementSet, plan: Plan, profile: Profile, *,
     allow_unresolved: bool = False,
@@ -96,11 +136,14 @@ def render(
     from .backends.segmentation import ALPHA_SOLID
 
     history: list[OperationRecord] = []
-    source = image_rgb
 
     if not plan.feasible:
         history.append(OperationRecord("crop_resize", "refused", "no feasible crop in the plan"))
         return RenderResult(None, history)
+
+    # --- colour_convert: everything after this works in sRGB -----------------------------
+    source, colour = _convert_to_srgb(image_rgb)
+    history.append(colour)
 
     # --- replace_background, in source space, before the resample ------------------------
     policy = profile.policy("replace_background")
@@ -151,9 +194,4 @@ def render(
         "crop_resize", "done", "single Lanczos resample through a float crop box",
         params={"box": [round(v, 2) for v in box], "scale": plan.chosen.outcome.scale,
                 "output": {"width": size[0], "height": size[1]}}))
-
-    history.append(OperationRecord(
-        "colour_convert", "skipped",
-        "the source's embedded colour profile was not consulted; sRGB is assumed and the "
-        "output is written as sRGB without a profile"))
     return RenderResult(out, history)

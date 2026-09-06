@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-from .encode import encode
+from .encode import encode, write_unconstrained
 from .geometry import Infeasible, Solution
 from .measure import MeasurementError, load_rgb, measure_photo
 from .plan import make_plan
@@ -138,7 +138,7 @@ def _capabilities(as_json: bool) -> int:
     return EXIT_OK
 
 
-def _render_history(rendered, encoded, out) -> None:
+def _render_history(rendered, encoded) -> None:
     print("\noperations")
     for h in rendered.history:
         flag = "  (opt-in)" if h.opt_in else ""
@@ -150,10 +150,8 @@ def _render_history(rendered, encoded, out) -> None:
         for t in encoded.trace:
             print(f"  {'':<20}          q{t['quality']}: {t['bytes']} bytes"
                   f"{' <- chosen' if t['fits'] else ''}")
-    if rendered.rendered and encoded is not None and encoded.done:
+    if encoded is not None and encoded.done:
         print(f"\n  written: {encoded.path}")
-    elif rendered.rendered and encoded is None:
-        print(f"\n  written: {out} (print profile: no digital encoding rules; Pillow defaults)")
     else:
         print("\n  NOT WRITTEN")
 
@@ -258,6 +256,10 @@ def main(argv: list[str] | None = None) -> int:
         print("error: --out requires --spec: a file is rendered for one destination profile",
               file=sys.stderr)
         return EXIT_USAGE
+    if args.out is not None and args.out.exists() and args.out.resolve() == args.photo.resolve():
+        print("error: --out is the input photo; the original is never overwritten",
+              file=sys.stderr)
+        return EXIT_USAGE
 
     if args.spec is not None and args.spec not in PROFILES:
         print(
@@ -300,10 +302,10 @@ def main(argv: list[str] | None = None) -> int:
         profile = PROFILES[args.spec]
         rendered = render(load_rgb(args.photo), measurements, plan, profile,
                           allow_unresolved=args.allow_unresolved_operations)
-        if rendered.rendered and profile.encoding is not None:
-            encoded = encode(rendered.image, profile.encoding, args.out)
-        elif rendered.rendered:
-            rendered.image.save(args.out)  # a print profile: no digital limits to search
+        if rendered.rendered:
+            encoded = (encode(rendered.image, profile.encoding, args.out)
+                       if profile.encoding is not None
+                       else write_unconstrained(rendered.image, args.out))
 
     if args.json:
         json.dump(
@@ -322,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         if plan:
             _render_plan(plan)
         if rendered:
-            _render_history(rendered, encoded, args.out)
+            _render_history(rendered, encoded)
 
     # The report is emitted in every case so a caller can see what was established; the exit
     # code still says the photo could not be measured. Checked before plan feasibility, so a
@@ -331,8 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CANNOT_MEASURE
     if plan and not plan.feasible:
         return EXIT_NO_CROP
-    if args.out is not None and (rendered is None or not rendered.rendered
-                                 or (encoded is not None and not encoded.done)):
+    if args.out is not None and (encoded is None or not encoded.done):
         return EXIT_NOT_WRITTEN
     return EXIT_WARNINGS if preflight.warnings else EXIT_OK
 

@@ -9,8 +9,11 @@ Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 ### Added (unreleased, Stage 3)
 - `--out FILE` renders the planned crop and writes it (requires `--spec`). Crop and resize are a
   single uniform resample; the output is 8-bit sRGB JPEG, 4:4:4, no metadata, at the highest
-  listed quality whose written size falls inside the destination's byte band. If no listed
-  quality fits, the file is not written and the report says so with the sizes tried (exit 5).
+  listed quality whose written size falls inside the destination's byte band. A source with an
+  embedded colour profile (Display P3 on iPhone photos) is converted to sRGB; one without is
+  assumed sRGB and the report says so. If no listed quality fits, or the destination cannot be
+  written, nothing at `--out` is touched and the report says why (exit 5). `--out` naming the
+  input photo is refused.
 - Background replacement is performed only where the destination's rules allow it. A destination
   whose rules do not address editing (China) gets it only with `--allow-unresolved-operations`,
   and the report records that it was an opt-in; a destination that prohibits it (NZ) never does.
