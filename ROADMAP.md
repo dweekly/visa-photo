@@ -23,10 +23,11 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
 - **Calibration beyond one subject.** MST-E, then the Chicago Face Database, then consenting
   volunteers for the matched failure conditions no dataset covers. Sources, terms and the analysis
   design are in [docs/PLAN.md](docs/PLAN.md) → Calibration. After Stage 1b.
-- **Stage 3 — render and encode.** In progress on PR #5, a lean rebuild of the parked #4: one
-  decode, colour conversion to sRGB, one resample, a bounded JPEG quality search on written
-  bytes with staged writes, `--out`. Plan and scope in
-  [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md).
+- ~~**Stage 3 — render and encode.**~~ Merged 2026-09-06 (PR #5, `605b87a`). One decode;
+  colour conversion to sRGB from the embedded profile; one resample through the clamped float
+  box; a bounded JPEG quality search on written bytes with staged writes; `--out`, the
+  operation history, exit 5. Scope and what was left out in
+  [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md). Two review passes and a receipt.
 - **Stage 4 — validator and report contract.** Per-criterion pass / fail / indeterminate /
   not-evaluated, each with a reason, measured from the written file. Re-fitting after colour
   conversion, downsampling and JPEG encoding moves landmarks and matte edges; record predicted
