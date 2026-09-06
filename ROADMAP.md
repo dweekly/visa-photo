@@ -14,14 +14,12 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   see Stage 1b.
 - ~~**Stage 2 — spec schema and geometry solver.**~~ Merged 2026-09-06 (PR #2). Exact interval
   feasibility with named conflicts, China digital and paper profiles, `--spec`. Two review passes.
-- **Stage 1b — precondition-driven measurement.** In progress on PR #3. Landed on the
-  branch: gate graph and registry; frozen tri-state gates evaluated once before anything is
-  emitted; the registry as the only construction path; `add()` refusing double writes;
-  `NOT_ATTEMPTED`; `--capabilities`; three-pass `measure()`; all seven inventory defects fixed
-  by construction with reproductions driven through the production path; the cheek patch
-  redefined per eye and re-derived on the eleven photographs (threshold 0.53, clean gap).
-  The planner refuses a size whose rule's measurement is unavailable, naming both, rather than
-  solving around it. Complete on the branch; under review.
+- ~~**Stage 1b — precondition-driven measurement.**~~ Merged 2026-09-06 (PR #3, `7c6713b`).
+  Gate graph and registry as the only construction path; frozen tri-state gates evaluated once
+  before anything is emitted; three-pass `measure()`; observed and anatomical tiers; the cheek
+  patch redefined per eye and re-derived (threshold 0.53); the planner refuses a size whose
+  rule's measurement is unavailable, naming both; `--capabilities`. Two review passes and a
+  receipt run.
 - **Calibration beyond one subject.** MST-E, then the Chicago Face Database, then consenting
   volunteers for the matched failure conditions no dataset covers. Sources, terms and the analysis
   design are in [docs/PLAN.md](docs/PLAN.md) → Calibration. After Stage 1b.
