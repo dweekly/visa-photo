@@ -1,4 +1,9 @@
-"""Face landmark, pose and expression measurement via MediaPipe.
+"""Face landmark fitting via MediaPipe. Fit only - no gates, no measurements.
+
+This module runs the model and returns what it returned. Deciding what any of it means happens
+in `evaluate.py`, after every gate has been evaluated, so that nothing here can emit a value
+before its preconditions are known. That ordering was the structural cause of Stage 1's
+repeated defect.
 
 Version pin: mediapipe must be on the 0.10 line for macOS. 1.0.x aborts inside a Metal helper
 during graph setup there, on both an unsupported and a supported Python. It works on Linux once
@@ -7,296 +12,83 @@ libGLESv2 is installed, and both produce identical values. See NEGATIVE_RESULTS.
 
 from __future__ import annotations
 
-import math
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
-from ..measurements import Confidence, Measurement, MeasurementSet, Status
+from types import MappingProxyType
+from typing import Mapping
 
 # Indices into MediaPipe's 478-point mesh. Topology is defined by canonical_face_model.obj in
 # google-ai-edge/mediapipe (Apache-2.0). 468 and 473 are the iris centres, present only with
-# the iris-refined bundle; 152 is the chin. These are conventional rather than formally
-# specified, so `_sanity_check` verifies them against the image rather than trusting them.
+# the iris-refined bundle; 152 is the chin; 234/454 are the face-oval extremes. Conventional
+# rather than formally specified; `evaluate.py` sanity-checks chin-below-eyes on every image.
 IDX_CHIN = 152
 IDX_IRIS_LEFT = 468
 IDX_IRIS_RIGHT = 473
-# Extremes of the face oval. NOT ICAO's ear-lobe reference points - see head_width note below.
 IDX_OVAL_LEFT = 234
 IDX_OVAL_RIGHT = 454
 
 LANDMARKS_WITH_IRIS = 478
 
+# MediaPipe's num_faces is a MAXIMUM. Detecting with 1 cannot establish that only one face is
+# present; this is set well above one so "exactly one" is a finding of an unrestricted search.
+MAX_FACES_TO_DETECT = 4
 
-class LandmarkError(RuntimeError):
-    pass
+
+@dataclass(frozen=True)
+class LandmarkFit:
+    """Raw model output for one image, in EXIF-normalized pixel coordinates."""
+
+    faces: int
+    """Faces found. -1 when the model itself failed to run; `error` says why."""
+    points: tuple[tuple[float, float], ...] | None
+    """(x, y) in pixels for the first face, or None when faces != 1."""
+    blendshapes: Mapping[str, float] | None
+    matrix: tuple[tuple[float, ...], ...] | None
+    """The 4x4 facial transformation matrix, or None if the model returned none."""
+    version: str
+    error: str | None = None
 
 
-def _euler_degrees(matrix: Any) -> tuple[float, float, float]:
-    """Decompose the 4x4 facial transformation matrix into (pitch, yaw, roll) in degrees.
-
-    MediaPipe documents this matrix as a canonical-face-to-detected-face transform for applying
-    effects; it is not documented as a calibrated pose estimate. Two backends disagreed by up to
-    2.6 degrees on one image against an ICAO tolerance of +/-5. Hence Confidence.ADVISORY.
-    """
+def fit(image_rgb, model: Path) -> LandmarkFit:
+    """Run the landmarker. Never raises for image content; model failures are recorded."""
     import numpy as np
 
-    m = np.asarray(matrix)
-    sy = math.sqrt(float(m[0, 0]) ** 2 + float(m[1, 0]) ** 2)
-    if sy < 1e-6:  # gimbal lock
-        return (
-            math.degrees(math.atan2(-float(m[1, 2]), float(m[1, 1]))),
-            math.degrees(math.atan2(-float(m[2, 0]), sy)),
-            0.0,
+    try:
+        import mediapipe as mp
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision
+    except Exception as exc:  # noqa: BLE001
+        return LandmarkFit(-1, None, None, None, "unavailable", f"mediapipe import failed: {exc!r}")
+
+    version = getattr(mp, "__version__", "unknown")
+    try:
+        landmarker = vision.FaceLandmarker.create_from_options(
+            vision.FaceLandmarkerOptions(
+                base_options=mp_python.BaseOptions(model_asset_path=str(model)),
+                output_face_blendshapes=True,
+                output_facial_transformation_matrixes=True,
+                num_faces=MAX_FACES_TO_DETECT,
+            )
         )
-    return (
-        math.degrees(math.atan2(float(m[2, 1]), float(m[2, 2]))),
-        math.degrees(math.atan2(-float(m[2, 0]), sy)),
-        math.degrees(math.atan2(float(m[1, 0]), float(m[0, 0]))),
-    )
-
-
-def measure(image_rgb, model: Path, result: MeasurementSet) -> dict[str, float]:
-    """Add landmark-derived measurements to `result`. Returns the blendshape scores.
-
-    Raises LandmarkError when no usable face is present - that is a hard stop for the whole
-    pipeline, not an unavailable measurement, because nothing downstream is meaningful.
-    """
-    import numpy as np
-
-    import mediapipe as mp
-    from mediapipe.tasks import python as mp_python
-    from mediapipe.tasks.python import vision
-
-    result.backends["mediapipe"] = mp.__version__
-
-    landmarker = vision.FaceLandmarker.create_from_options(
-        vision.FaceLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=str(model)),
-            output_face_blendshapes=True,
-            output_facial_transformation_matrixes=True,
-            num_faces=2,  # detect 2 so we can REPORT "more than one face", not silently take one
-        )
-    )
-    # Built from an array, not a path: MediaPipe's own loader cannot read HEIC.
-    image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(image_rgb))
-    detection = landmarker.detect(image)
+        # Built from an array, not a path: MediaPipe's own loader cannot read HEIC.
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.asarray(image_rgb))
+        detection = landmarker.detect(image)
+    except Exception as exc:  # noqa: BLE001
+        return LandmarkFit(-1, None, None, None, version, f"landmarker failed: {exc!r}")
 
     faces = len(detection.face_landmarks)
-    if faces == 0:
-        raise LandmarkError("no face detected in the source image")
-    if faces > 1:
-        raise LandmarkError(
-            f"{faces} faces detected; every specification surveyed requires the applicant alone"
-        )
-
-    marks = detection.face_landmarks[0]
-    if len(marks) < LANDMARKS_WITH_IRIS:
-        raise LandmarkError(
-            f"model returned {len(marks)} landmarks, need {LANDMARKS_WITH_IRIS} "
-            "(bundle lacks iris refinement)"
-        )
+    if faces != 1:
+        return LandmarkFit(faces, None, None, None, version)
 
     width, height = image.width, image.height
-
-    def point(index: int) -> tuple[float, float]:
-        return marks[index].x * width, marks[index].y * height
-
-    chin_x, chin_y = point(IDX_CHIN)
-    left_x, left_y = point(IDX_IRIS_LEFT)
-    right_x, right_y = point(IDX_IRIS_RIGHT)
-    eye_line = (left_y + right_y) / 2.0
-    eye_mid_x = (left_x + right_x) / 2.0
-    ied = math.hypot(right_x - left_x, right_y - left_y)
-
-    _sanity_check(chin_y, eye_line, ied)
-
-    add = result.add
-    add(Measurement(
-        name="chin_y_landmark",
-        definition=(
-            "Vertical position of the chin as fitted by the face mesh (anatomical chin "
-            "contour). On a bearded subject this sits ABOVE the visible beard edge."
-        ),
-        status=Status.AVAILABLE, value=chin_y, unit="px",
-        backend="mediapipe", confidence=Confidence.MEASURED,
-    ))
-    add(Measurement(
-        name="chin_y_visible",
-        definition=(
-            "Vertical position of the lowest visible point of the chin or beard, as a "
-            "specification measuring 'the base of the chin' on a bearded subject might mean."
-        ),
-        status=Status.UNSUPPORTED,
-        reason=(
-            "No backend here can isolate it. The person matte merges beard, neck and collar "
-            "into one foreground region, so its lower boundary is the clothing, not the chin. "
-            "Measured by hand on one image, this differed from the landmark chin by 85 px."
-        ),
-    ))
-    add(Measurement(
-        name="eye_line_y",
-        definition="Mean vertical position of the two iris centres.",
-        status=Status.AVAILABLE, value=eye_line, unit="px",
-        backend="mediapipe", confidence=Confidence.MEASURED,
-    ))
-    add(Measurement(
-        name="eye_mid_x",
-        definition="Horizontal midpoint between the two iris centres.",
-        status=Status.AVAILABLE, value=eye_mid_x, unit="px",
-        backend="mediapipe", confidence=Confidence.MEASURED,
-    ))
-    add(Measurement(
-        name="inter_eye_distance",
-        definition="Euclidean distance between the two iris centres (ICAO IED).",
-        status=Status.AVAILABLE, value=ied, unit="px",
-        backend="mediapipe", confidence=Confidence.MEASURED,
-    ))
-    add(Measurement(
-        name="head_width_face_oval",
-        definition=(
-            "Horizontal extent of the face-mesh oval (approximately temple to temple). This is "
-            "NOT ICAO's head width, which is measured between the ear lobes, and NOT China's, "
-            "whose diagram spans the hair. Do not compare it to either band."
-        ),
-        status=Status.AVAILABLE,
-        value=abs(point(IDX_OVAL_RIGHT)[0] - point(IDX_OVAL_LEFT)[0]),
-        unit="px", backend="mediapipe", confidence=Confidence.MEASURED,
-    ))
-    add(Measurement(
-        name="head_width_ear_to_ear",
-        definition=(
-            "ICAO head width W: distance between lines through the upper and lower lobes of "
-            "each ear (ISO/IEC 14496-2 feature points 10.1/10.2/10.5/10.6)."
-        ),
-        status=Status.UNSUPPORTED,
-        reason=(
-            "The face mesh has no landmarks we can justify mapping to ear-lobe feature points. "
-            "Reporting the face-oval width under this name would silently answer a different "
-            "question than ICAO asks."
-        ),
-    ))
-
-    eye_patch = _eye_patch(np.asarray(image_rgb), (left_x, left_y), (right_x, right_y), ied)
-    if eye_patch is None:
-        add(Measurement(
-            name="eye_specular_fraction", definition=EYE_GLARE_DEFINITION,
-            status=Status.UNAVAILABLE,
-            reason="the eye sampling region falls outside the image",
-        ))
-    else:
-        add(Measurement(
-            name="eye_specular_fraction", definition=EYE_GLARE_DEFINITION,
-            status=Status.AVAILABLE,
-            value=float((eye_patch.max(axis=2) > NEAR_WHITE).mean()),
-            unit="fraction", backend="mediapipe+pixels", confidence=Confidence.ADVISORY,
-        ))
-
-    ratio = _eye_region_brightness_ratio(np.asarray(image_rgb), (left_x, left_y), (right_x, right_y), ied)
-    if ratio is None:
-        add(Measurement(
-            name="eye_brightness_ratio",
-            definition=EYE_BRIGHTNESS_DEFINITION,
-            status=Status.UNAVAILABLE,
-            reason="the eye or cheek sampling region falls outside the image",
-        ))
-    else:
-        add(Measurement(
-            name="eye_brightness_ratio",
-            definition=EYE_BRIGHTNESS_DEFINITION,
-            status=Status.AVAILABLE, value=ratio, unit="ratio",
-            backend="mediapipe+pixels", confidence=Confidence.ADVISORY,
-        ))
-
+    marks = detection.face_landmarks[0]
+    points = tuple((m.x * width, m.y * height) for m in marks)
+    blendshapes = (
+        MappingProxyType({c.category_name: float(c.score) for c in detection.face_blendshapes[0]})
+        if detection.face_blendshapes else None
+    )
+    matrix = None
     if detection.facial_transformation_matrixes:
-        pitch, yaw, roll = _euler_degrees(detection.facial_transformation_matrixes[0])
-        for name, value, axis in (
-            ("pose_pitch", pitch, "up/down"),
-            ("pose_yaw", yaw, "left/right turn"),
-            ("pose_roll", roll, "in-plane tilt"),
-        ):
-            add(Measurement(
-                name=name,
-                definition=f"Head rotation, {axis}, from the facial transformation matrix.",
-                status=Status.AVAILABLE, value=value, unit="deg",
-                backend="mediapipe", confidence=Confidence.ADVISORY,
-            ))
-    else:
-        for name in ("pose_pitch", "pose_yaw", "pose_roll"):
-            add(Measurement(
-                name=name, definition="Head rotation.", status=Status.UNAVAILABLE,
-                reason="the model returned no facial transformation matrix",
-            ))
-
-    scores: dict[str, float] = {}
-    if detection.face_blendshapes:
-        scores = {c.category_name: float(c.score) for c in detection.face_blendshapes[0]}
-    return scores
-
-
-NEAR_WHITE = 240
-"""Channel value at which a pixel counts as a specular highlight rather than skin or iris."""
-
-EYE_GLARE_DEFINITION = (
-    "Fraction of pixels in the eye region with any channel brighter than 240/255, i.e. "
-    "specular highlights. Fires on lens glare and on reflective lenses. It may also fire on "
-    "clear spectacles without glare - see thresholds.EYE_GLARE_FRACTION."
-)
-
-
-def _eye_patch(pixels, left, right, ied: float):
-    """The rectangle spanning both eyes, or None if it leaves the frame."""
-    height, width = pixels.shape[:2]
-    (lx, ly), (rx, ry) = left, right
-    half = int(ied * 0.32)
-    if half < 1:
-        return None
-    top, bottom = int((ly + ry) / 2) - half, int((ly + ry) / 2) + half
-    x0, x1 = int(min(lx, rx)) - half, int(max(lx, rx)) + half
-    if top < 0 or x0 < 0 or x1 > width or bottom > height:
-        return None
-    patch = pixels[top:bottom, x0:x1]
-    return patch if patch.size else None
-
-
-EYE_BRIGHTNESS_DEFINITION = (
-    "Mean brightness of the region spanning both eyes, divided by the mean brightness of a "
-    "cheek patch below them. Below 1 the eyes are markedly darker than the face, which "
-    "indicates tinted lenses or shadow across the eyes. It does not distinguish the two, and "
-    "says nothing about glare or frame occlusion."
-)
-
-
-def _eye_region_brightness_ratio(pixels, left, right, ied: float):
-    """Ratio of eye-region to cheek brightness, or None if either patch leaves the frame."""
-    import numpy as np
-
-    height, width = pixels.shape[:2]
-    (lx, ly), (rx, ry) = left, right
-    half = int(ied * 0.32)
-    if half < 1:
-        return None
-    eye_top, eye_bottom = int((ly + ry) / 2) - half, int((ly + ry) / 2) + half
-    eye_left, eye_right = int(min(lx, rx)) - half, int(max(lx, rx)) + half
-    cheek_top = int((ly + ry) / 2 + ied * 0.75)
-    cheek_bottom = cheek_top + half
-    if eye_top < 0 or eye_left < 0 or eye_right > width or cheek_bottom > height:
-        return None
-    eye = pixels[eye_top:eye_bottom, eye_left:eye_right]
-    cheek = pixels[cheek_top:cheek_bottom, int(min(lx, rx)):int(max(lx, rx))]
-    if eye.size == 0 or cheek.size == 0:
-        return None
-    cheek_mean = float(np.mean(cheek))
-    if cheek_mean <= 0:
-        return None
-    return float(np.mean(eye)) / cheek_mean
-
-
-def _sanity_check(chin_y: float, eye_line: float, ied: float) -> None:
-    """Catch a silently re-indexed landmark set, which would otherwise poison everything."""
-    if chin_y <= eye_line:
-        raise LandmarkError(
-            f"chin (y={chin_y:.0f}) is not below the eye line (y={eye_line:.0f}); "
-            "landmark indices may not mean what this build assumes"
-        )
-    if ied < 1.0:
-        raise LandmarkError(f"degenerate inter-eye distance ({ied:.2f} px)")
+        raw = np.asarray(detection.facial_transformation_matrixes[0], dtype=float)
+        matrix = tuple(tuple(float(x) for x in row) for row in raw)
+    return LandmarkFit(faces, points, blendshapes, matrix, version)

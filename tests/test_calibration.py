@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from visaphoto.measurements import Confidence, Measurement, MeasurementSet, Status
+from visaphoto.measurements import Confidence, Measurement, MeasurementSet, Precondition, Status
 from visaphoto.preflight import Outcome, run
 
 # file -> (smile, jawOpen, eyeBlink, pitch, yaw, roll), as measured.
@@ -60,10 +60,12 @@ def build(name: str) -> MeasurementSet:
         result.add(Measurement(
             name=f"pose_{axis}", definition="Head rotation.", status=Status.AVAILABLE,
             value=value, unit="deg", backend="posed-set", confidence=Confidence.ADVISORY,
+            preconditions=(Precondition("image_decoded", True, "ok"),),
         ))
     result.add(Measurement(
         name="inter_eye_distance", definition="IED.", status=Status.AVAILABLE,
         value=494.0, unit="px", backend="posed-set", confidence=Confidence.MEASURED,
+        preconditions=(Precondition("image_decoded", True, "ok"),),
     ))
     return result
 
@@ -135,41 +137,40 @@ class TestKnownMisses:
         assert outcome("8842_wide_stare", "expression_neutral") is Outcome.LIKELY_OK
 
 
-# --- Eye-region signals, second posed set (2026-09-04) -----------------------------------
-# file -> (eye/cheek brightness ratio, near-white fraction), as measured.
+# --- Eye-region signals, per eye, Stage 1b patch definition (re-derived 2026-09-06) ---------
+# file -> ((ratio_left, ratio_right), (specular_left, specular_right)), as measured.
 EYE_REGION = {
-    "8833_bare_eyes":          (1.500, 0.0002),
-    "8862_bare_eyes":          (1.451, 0.0004),
-    "8858_shades_on_head":     (1.627, 0.0004),
-    "8855_clear_glasses":      (1.233, 0.0117),
-    "8856_clear_glasses":      (1.315, 0.0340),
-    "8857_glasses_glare":      (1.276, 0.0100),
-    "8852_cap_shadowed_eyes":  (0.754, 0.0000),
-    "8853_mirrored_shades":    (0.812, 0.0162),
-    # Controlled pair: identical light and background, shades worn then pushed up.
-    "8863_mirrored_shades":    (1.013, 0.0201),
-    "8864_shades_on_head":     (1.251, 0.0002),
+    "8822_bare_reference":     ((0.780, 0.720), (0.0000, 0.0000)),
+    "8833_bare_eyes":          ((0.851, 0.848), (0.0002, 0.0002)),
+    "8862_bare_eyes":          ((0.774, 0.736), (0.0004, 0.0004)),
+    "8864_shades_on_head":     ((0.845, 0.790), (0.0002, 0.0002)),
+    "8858_shades_on_head":     ((0.826, 0.758), (0.0005, 0.0005)),
+    "8855_clear_glasses":      ((0.718, 0.772), (0.0117, 0.0117)),
+    "8856_clear_glasses":      ((0.683, 0.784), (0.0340, 0.0340)),
+    "8857_glasses_glare":      ((0.721, 0.628), (0.0100, 0.0100)),
+    "8852_cap_shadowed_eyes":  ((0.392, 0.441), (0.0000, 0.0000)),
+    "8853_mirrored_shades":    ((0.383, 0.299), (0.0162, 0.0162)),
+    "8863_mirrored_shades":    ((0.394, 0.428), (0.0201, 0.0201)),
 }
-EYES_LOOK_OBSCURED = {
-    "8852_cap_shadowed_eyes", "8853_mirrored_shades", "8863_mirrored_shades",
-}
+EYES_LOOK_OBSCURED = {"8852_cap_shadowed_eyes", "8853_mirrored_shades", "8863_mirrored_shades"}
 EYES_LOOK_GLARED = {
-    "8855_clear_glasses", "8856_clear_glasses", "8857_glasses_glare", "8853_mirrored_shades",
-    "8863_mirrored_shades",
+    "8855_clear_glasses", "8856_clear_glasses", "8857_glasses_glare",
+    "8853_mirrored_shades", "8863_mirrored_shades",
 }
 
 
 def eye_region_set(name: str) -> MeasurementSet:
-    ratio, specular = EYE_REGION[name]
+    (rl, rr), (sl, sr) = EYE_REGION[name]
     result = build("8833_neutral")
     result.source = name
     for field, value, unit in (
-        ("eye_brightness_ratio", ratio, "ratio"),
-        ("eye_specular_fraction", specular, "fraction"),
+        ("patch_brightness_ratio:left", rl, "ratio"), ("patch_brightness_ratio:right", rr, "ratio"),
+        ("eye_specular_fraction:left", sl, "fraction"), ("eye_specular_fraction:right", sr, "fraction"),
     ):
         result.add(Measurement(
             name=field, definition="d", status=Status.AVAILABLE, value=value,
             unit=unit, backend="posed-set", confidence=Confidence.ADVISORY,
+            preconditions=(Precondition("image_decoded", True, "ok"),),
         ))
     return result
 
@@ -187,23 +188,26 @@ def test_obscured_or_glared_eyes_warn(name):
     assert glasses_outcome(name) is Outcome.WARN
 
 
-@pytest.mark.parametrize(
-    "name", sorted(set(EYE_REGION) - EYES_LOOK_OBSCURED - EYES_LOOK_GLARED)
-)
+@pytest.mark.parametrize("name", sorted(set(EYE_REGION) - EYES_LOOK_OBSCURED - EYES_LOOK_GLARED))
 def test_clearly_visible_eyes_do_not_warn(name):
     assert glasses_outcome(name) is Outcome.LIKELY_OK
 
 
-def test_sunglasses_pushed_up_onto_the_head_are_not_flagged():
-    """Spectacles present in the photo but not over the eyes are not a problem, and the
-    signal is about the eye region rather than about detecting eyewear."""
-    assert glasses_outcome("8858_shades_on_head") is Outcome.LIKELY_OK
+def test_the_separation_is_real_and_stated():
+    """The gap the threshold sits in, asserted from the data rather than assumed. If a new
+    photograph closes it, this fails and the threshold - not the photograph - is in question."""
+    from visaphoto.thresholds import EYES_OBSCURED_RATIO
+
+    obscured = [r for n in EYES_LOOK_OBSCURED for r in EYE_REGION[n][0]]
+    clear = [r for n in set(EYE_REGION) - EYES_LOOK_OBSCURED for r in EYE_REGION[n][0]]
+    assert max(obscured) < EYES_OBSCURED_RATIO < min(clear)
 
 
-def test_shadowed_eyes_are_caught_even_with_no_eyewear():
-    """A peaked cap shadowing the eyes trips the same rule. CN prohibits shadows over the
-    eyes in the same sentence as tint, so this is the rule working, not a coincidence."""
-    assert glasses_outcome("8852_cap_shadowed_eyes") is Outcome.WARN
+def test_mirrored_shades_without_a_cap_are_deep_in_the_obscured_band():
+    """Under the old both-eyes patch this photo read 1.013 against 1.0 and nearly escaped."""
+    rl, rr = EYE_REGION["8863_mirrored_shades"][0]
+    from visaphoto.thresholds import EYES_OBSCURED_RATIO
+    assert max(rl, rr) < EYES_OBSCURED_RATIO - 0.1
 
 
 def test_partial_assessment_is_stated_in_the_finding():
@@ -212,26 +216,3 @@ def test_partial_assessment_is_stated_in_the_finding():
     finding = next(f for f in report.findings if f.requirement.key == "glasses_cn")
     assert "PARTIAL" in finding.detail
     assert "Frames" in finding.detail
-
-
-def test_mirrored_shades_without_a_cap_are_caught():
-    """The near-miss that moved the threshold. At 1.013 this photo sat just above the old
-    value of 1.0: bare mirrored lenses reflect the room, so brightness alone barely separates
-    them. Earlier sunglasses photographs were only caught because a peaked cap added shadow."""
-    assert glasses_outcome("8863_mirrored_shades") is Outcome.WARN
-
-
-def test_the_paired_control_passes():
-    """Same glasses, same light, same background - pushed up onto the head. If this warned,
-    the signal would be detecting eyewear rather than obscured eyes."""
-    assert glasses_outcome("8864_shades_on_head") is Outcome.LIKELY_OK
-
-
-def test_bare_eyes_and_clear_glasses_are_not_separable_by_brightness():
-    """Guards against a tempting wrong conclusion. The paired bare-eye control reads LOWER
-    (1.251) than two clear-glasses photographs (1.276, 1.315), so this signal must never be
-    used to decide whether someone is wearing spectacles - which matters because the US visa
-    channel bans them outright."""
-    bare = EYE_REGION["8864_shades_on_head"][0]
-    glasses = [EYE_REGION[k][0] for k in ("8856_clear_glasses", "8857_glasses_glare")]
-    assert bare < max(glasses), "the classes overlap; do not threshold between them"

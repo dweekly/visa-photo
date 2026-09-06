@@ -100,34 +100,24 @@ width. Stopping halfway between the eye line and the chin captures the real peak
 stays clear of the collar.
 """
 
-EYES_OBSCURED_RATIO: Final[float] = 1.12
-"""Below this eye-region/cheek brightness ratio we advise the eyes look obscured.
+EYES_OBSCURED_RATIO: Final[float] = 0.53
+"""Below this per-eye brightness ratio (eye patch / cheek patch) an eye is treated as obscured.
 
-Measured across 11 photographs of one subject on 2026-09-04:
+Re-derived 2026-09-06 for the Stage 1b patch definition (per eye; cheek patch on cheek proper,
+see CHEEK_PATCH_* above). Eleven photographs of one subject, both eyes each:
 
-    obscured                              not obscured
-      0.54  mirrored shades + cap           1.23  clear glasses
-      0.75  peaked cap shadowing eyes       1.25  bare eyes (paired control)
-      0.81  mirrored shades + cap           1.28  clear glasses
-      1.01  mirrored shades, no cap         1.32  clear glasses
-                                            1.45  bare eyes
-                                            1.50  bare eyes
-                                            1.63  shades pushed up on head
+    obscured                                  not obscured
+      0.30-0.44  mirrored shades + cap          0.63-0.85  bare eyes (3 photos)
+      0.39-0.44  cap shadowing the eyes         0.76-0.85  shades pushed up on head (2)
+      0.39-0.43  mirrored shades, no cap        0.68-0.78  clear glasses (2)
+                                                0.63-0.72  glasses with visible glare
 
-The threshold was 1.0 until a controlled pair - the same mirrored sunglasses worn, then
-pushed up onto the head, same light and background - landed at 1.013 and escaped. The earlier
-sunglasses photographs had a peaked cap supplying the shadow; bare mirrored lenses reflect the
-room and stay bright. 1.12 is the midpoint of the real gap (1.013 to 1.233).
-
-Two consequences worth carrying:
-
-* **Brightness alone is a weak sunglasses detector.** It catches dark or shadowed eyes. It
-  nearly missed mirrored lenses, which the glare signal caught instead. The two are
-  complementary and neither is sufficient alone.
-* **Bare eyes and clear glasses cannot be separated by this signal.** The paired bare-eye
-  control (1.251) reads LOWER than two of the clear-glasses photographs (1.276, 1.315). An
-  earlier reading suggested a gap; with more data it is gone. Do not attempt to detect
-  spectacles this way."""
+0.53 is the midpoint of the gap (0.441 to 0.628). Under the previous definition - whose eye
+patch spanned both eyes and so included the bright nose bridge, and whose "cheek" was the
+philtrum - the no-cap mirrored shades read 1.013 against a threshold of 1.0 and nearly escaped;
+under this one they read 0.39 and 0.43. The eye term does the discriminating on this subject
+(41-68 obscured against 87-129 not); the cheek term stays 120-179 throughout. Whether that
+holds across skin tones is precisely what the calibration stage exists to find out."""
 
 EYE_GLARE_FRACTION: Final[float] = 0.003
 """Fraction of eye-region pixels near white above which we advise there may be glare.
@@ -147,3 +137,35 @@ we cannot yet tell whether this signal detects GLARE or merely detects LENSES. O
 of clear glasses with the light moved off-axis would settle it. Until then the flag is
 advisory and may fire on any spectacles. A needless second look costs a user little; a missed
 glare costs them a rejected application."""
+
+# --- Measurement operating conditions (Stage 1b) ----------------------------------------
+# These gate whether a measurement is made at all. They are OUR operating limits for the
+# measurement method, not any destination's legal tolerance, and the two are assessed
+# separately - see docs/STAGE1B-PRECONDITIONS.md.
+
+POSE_MEASUREMENT_LIMIT_DEG: Final[float] = 15.0
+"""Beyond this head rotation on an axis, measurements that project across it are not made.
+Horizontal projections (IED, head widths) shrink as cos(yaw): 3.4% at 15 degrees, 13% at 30.
+Gating errs toward unavailable; we never correct by an uncalibrated angle. Stated cost: a photo
+pitched 20 degrees - inside China's +/-25 legal tolerance - gets no eye line and so no crop."""
+
+MIN_RAW_EYE_SEPARATION_PX: Final[float] = 6.0
+"""Below this the iris candidates are too close to size any patch (patch half-width is
+0.32 x separation and must be >= 1 px). A diagnostic prerequisite, not an ICAO threshold;
+ICAO's IED floor is MIN_IED_PIXELS and is applied separately."""
+
+EYE_PATCH_HALF_FRACTION: Final[float] = 0.32
+"""Half-width of each eye patch as a fraction of raw eye separation. Same value as Stage 1."""
+
+CHEEK_PATCH_OUTWARD_FRACTION: Final[float] = 0.35
+CHEEK_PATCH_DOWN_FRACTION: Final[float] = 0.55
+CHEEK_PATCH_SIZE_FRACTION: Final[float] = 0.25
+"""Cheek patch, per eye: anchored at that iris, offset outward from the face midline and
+downward by these fractions of raw eye separation, square with this side. Chosen to land on
+cheek proper - the Stage 1 patch's x-range ran BETWEEN the eyes, so its denominator was the
+nose bridge and philtrum, nostrils included. Defined here before it is measured; the
+recalibration reports whatever it finds (see PLAN.md -> Calibration)."""
+
+MIN_CHEEK_LUMINANCE: Final[float] = 8.0
+"""Mean Rec.709 luminance below which a cheek patch is treated as an invalid denominator
+(effectively black: clipping, a shadow, or not skin). Our own floor."""

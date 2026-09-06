@@ -127,25 +127,36 @@ def _expression_flags(scores: dict[str, float], result: MeasurementSet) -> dict[
             ),
         )
 
-    ratio = result.value("eye_brightness_ratio")
-    if ratio is not None:
+    # Per eye, and each eye must be assessable on its own: averaging would let one clear eye
+    # hide the other's failure. An eye with no ratio is not "fine"; it is unassessed, and the
+    # flag says which.
+    ratios = {s: result.value(f"patch_brightness_ratio:{s}") for s in ("left", "right")}
+    assessed = {s: r for s, r in ratios.items() if r is not None}
+    if assessed:
+        worst = min(assessed.values())
+        missing = [s for s, r in ratios.items() if r is None]
         flags["eyes_obscured"] = Flag(
-            name="eyes_obscured", raised=ratio < EYES_OBSCURED_RATIO, score=ratio,
-            threshold=EYES_OBSCURED_RATIO,
+            name="eyes_obscured", raised=worst < EYES_OBSCURED_RATIO, score=worst,
+            threshold=EYES_OBSCURED_RATIO, complete=not missing,
             detail=(
-                f"the eye region is {ratio:.2f}x the brightness of the cheek (below "
-                f"{EYES_OBSCURED_RATIO} suggests tinted lenses or shadow across the eyes)"
+                "eye/cheek brightness "
+                + ", ".join(f"{s} {r:.2f}" for s, r in assessed.items())
+                + f" (below {EYES_OBSCURED_RATIO} suggests tinted lenses or shadow)"
+                + (f"; {', '.join(missing)} eye not assessable" if missing else "")
             ),
         )
 
-    glare = result.value("eye_specular_fraction")
-    if glare is not None:
+    specular = {s: result.value(f"eye_specular_fraction:{s}") for s in ("left", "right")}
+    assessed = {s: g for s, g in specular.items() if g is not None}
+    if assessed:
+        worst = max(assessed.values())
         flags["eye_glare"] = Flag(
-            name="eye_glare", raised=glare > EYE_GLARE_FRACTION, score=glare,
-            threshold=EYE_GLARE_FRACTION,
+            name="eye_glare", raised=worst > EYE_GLARE_FRACTION, score=worst,
+            threshold=EYE_GLARE_FRACTION, complete=len(assessed) == 2,
             detail=(
-                f"{glare * 100:.2f}% of the eye region is near-white (above "
-                f"{EYE_GLARE_FRACTION * 100:.1f}% suggests glare or a reflective lens)"
+                "near-white fraction of eye patch "
+                + ", ".join(f"{s} {g * 100:.2f}%" for s, g in assessed.items())
+                + f" (above {EYE_GLARE_FRACTION * 100:.1f}% suggests glare or a reflective lens)"
             ),
         )
 
@@ -212,20 +223,33 @@ def _assess(
         return Finding(requirement, Outcome.LIKELY_OK, detail, score=ied,
                        threshold=MIN_IED_PIXELS)
 
-    relevant = [flags[name] for name in requirement.signals if name in flags]
-    if not relevant:
+    present = [flags[name] for name in requirement.signals if name in flags]
+    absent = [name for name in requirement.signals if name not in flags]
+    if not present:
         return Finding(requirement, Outcome.NOT_EVALUATED,
                        "the model returned no scores for the signals this requirement needs")
     scope = f" [{requirement.note}]" if requirement.note.startswith(
         ("PARTIAL", "Derived. PARTIAL")
     ) else ""
-    fired = [f for f in relevant if f.raised]
+    fired = [f for f in present if f.raised]
     if fired:
         return Finding(requirement, Outcome.WARN,
                        "; ".join(f.detail for f in fired) + scope,
                        score=fired[0].score, threshold=fired[0].threshold)
+    # A warning from any assessed input stands. A clean result needs every signal the
+    # requirement names, each fully assessed. A signal with no flag was never looked at - the
+    # measurement behind it was unavailable - and a signal assessed on one eye only is half an
+    # answer. Neither is "clear", and the requirement's own signal list, not the set of flags
+    # that happened to be produced, decides what counts as complete.
+    incomplete = [f.detail for f in present if not f.complete]
+    incomplete += [f"{name} not assessed" for name in absent]
+    if incomplete:
+        return Finding(requirement, Outcome.NOT_EVALUATED,
+                       "; ".join(incomplete)
+                       + " - not every input could be assessed, so no clean result is claimed"
+                       + scope)
     return Finding(requirement, Outcome.LIKELY_OK,
-                   "; ".join(f.detail for f in relevant) + scope)
+                   "; ".join(f.detail for f in present) + scope)
 
 
 def _assess_pose(requirement: Requirement, result: MeasurementSet) -> Finding:

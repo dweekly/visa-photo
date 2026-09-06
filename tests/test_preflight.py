@@ -14,6 +14,7 @@ from visaphoto.measurements import (
     Confidence,
     Measurement,
     MeasurementSet,
+    Precondition,
     Status,
 )
 from visaphoto.preflight import Outcome, run
@@ -37,6 +38,7 @@ def make_set(ied: float = 494.0) -> MeasurementSet:
         definition="Euclidean distance between the two iris centres (ICAO IED).",
         status=Status.AVAILABLE, value=ied, unit="px",
         backend="synthetic", confidence=Confidence.MEASURED,
+        preconditions=(Precondition("image_decoded", True, "ok"),),
     ))
     return result
 
@@ -93,7 +95,8 @@ class TestResolution:
         result = MeasurementSet(source="synthetic", image_width=100, image_height=100)
         result.add(Measurement(
             name="inter_eye_distance", definition="IED.",
-            status=Status.UNAVAILABLE, reason="no face",
+            status=Status.UNAVAILABLE,
+            preconditions=(Precondition("face_detected_one", False, "no face"),),
         ))
         report = run(result, NEUTRAL, jurisdiction=None)
         assert outcome_for(report, "generic_resolution") is Outcome.NOT_EVALUATED

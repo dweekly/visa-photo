@@ -12,14 +12,16 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   expression and eye-region signals, checked against sourced requirements. Shipped *without* the
   capability matrix the plan required, at the cost of six review passes finding one defect class;
   see Stage 1b.
-- **Stage 2 — spec schema and geometry solver.** Built (PR #2): exact interval feasibility, China
-  digital and paper profiles, `--spec`. Reproduced the hand-built crop to 0.14%. Awaiting review
-  and merge.
-- **Stage 1b — precondition-driven measurement.** A measurement is unavailable unless every gate
-  it declares is affirmatively true; the registry is the only construction path; gates form an
-  acyclic graph evaluated before anything is emitted; observed and anatomical quantities are
-  separate tiers. Design and verification in [docs/PLAN.md](docs/PLAN.md) → Measurement. Lands
-  after Stage 2, before Stage 3.
+- ~~**Stage 2 — spec schema and geometry solver.**~~ Merged 2026-09-06 (PR #2). Exact interval
+  feasibility with named conflicts, China digital and paper profiles, `--spec`. Two review passes.
+- **Stage 1b — precondition-driven measurement.** In progress on PR #3. Landed on the
+  branch: gate graph and registry; frozen tri-state gates evaluated once before anything is
+  emitted; the registry as the only construction path; `add()` refusing double writes;
+  `NOT_ATTEMPTED`; `--capabilities`; three-pass `measure()`; all seven inventory defects fixed
+  by construction with reproductions driven through the production path; the cheek patch
+  redefined per eye and re-derived on the eleven photographs (threshold 0.53, clean gap).
+  The planner refuses a size whose rule's measurement is unavailable, naming both, rather than
+  solving around it. Complete on the branch; under review.
 - **Calibration beyond one subject.** MST-E, then the Chicago Face Database, then consenting
   volunteers for the matched failure conditions no dataset covers. Sources, terms and the analysis
   design are in [docs/PLAN.md](docs/PLAN.md) → Calibration. After Stage 1b.
