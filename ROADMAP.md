@@ -32,7 +32,16 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   fail / indeterminate / not-evaluated from the written file's own measurements, with the
   plan's prediction and the delta beside each; `--validate` for a file you already have; both
   readings of KB; strict bounds; a report envelope with a version. Plan in
-  [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md).
+  [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md). Three review passes taken; one open
+  finding holds the merge — see the plan's "Open finding".
+- **Solver objective when a preference is unsatisfiable** (Stage 2 follow-up). The centring
+  preference's slack takes part in the min-slack objective; when the preference cannot be met
+  its negative slack dominates the minimum at every crop, and the search no longer sees the
+  requirements' slack. Reproduction: `reference_measurements(head_width_silhouette=200,
+  inter_eye_distance=100, matte_top_row=1000, eye_line_y=1200, chin_landmark_y=1400,
+  eye_mid_x=150)` under `cn_visa_digital` chooses scale 1.03 with crown gap 10 and eye line
+  256 (min slack 0) while scale 1.02 gives eye line 258. Fix direction: maximize the
+  requirements' slack first; use preferences only to choose among crops that tie.
 - **Stage 5 — seeded profiles and docs.** `cn_visa_digital`, `cn_visa_paper`, `us_visa_digital`,
   `us_passport_print`, `schengen_icao_base`, `nz_nzeta`.
 

@@ -189,6 +189,34 @@ The checks under "What must be true", each a test from a file on disk with only 
 stubbed, plus the real run: the reference photo through `--out`, its validation block in the PR,
 and the written file through `--validate` giving the same verdicts.
 
+## Open finding — holds the merge
+
+Review pass three (47296f6) reproduced a false refusal from the solver-side strict-bound check
+added on this branch. With `reference_measurements(head_width_silhouette=200,
+inter_eye_distance=100, matte_top_row=1000, eye_line_y=1200, chin_landmark_y=1400,
+eye_mid_x=150)`, the digital profile returns `strict_bound` — "the only feasible value is 256" —
+while `(s=1.02, u=1010, v=0)` satisfies every published rule with the eye line at 258.
+
+What the reproduction shows underneath: without the refusal the solver chooses scale 1.03,
+where the vertical placement is pinned to one point (crown gap exactly 10, eye line exactly
+256, `min_slack` 0.0000), although scale 1.02 leaves positive slack. The centring preference
+cannot be satisfied for this face (the eye midpoint is at x=150, so containment pins the crop's
+left edge and the preference's slack is −0.136 whatever the crop), and that negative slack
+dominates the min-slack objective at every point, leaving the search blind to the requirements'
+slack. That is a Stage 2 objective defect — a preference was meant to be honoured where the
+rules leave room, never to decide between crops that satisfy the rules — and strictness exposed
+it: the refusal then reported the pinned optimum as the only feasible point.
+
+**The change this branch should make, not yet made:** remove the solver-side refusal. The
+validator already fails a value on a strict bound, so nothing false can pass; the cost is that
+this input would produce a file the validator then fails (eye line 256) while a passing crop
+exists. **The change that belongs to Stage 2, filed on ROADMAP:** when a preference cannot be
+satisfied, it must not take part in the minimum — maximize the requirements' slack first and
+use preferences only to choose among equally good crops.
+
+Landing either needs a receipt at the new head, which is a fourth run — a decision for the
+author of the review rule, not for the branch.
+
 ## Sequence
 
 - [x] This document, reviewed once by Codex (GPT-6 Astra, high); ROADMAP entries.
@@ -197,4 +225,4 @@ and the written file through `--validate` giving the same verdicts.
 - [x] CLI: `--validate`, post-write validation, exit table, report envelope; README report
       section and status line.
 - [x] Tests as above; real run.
-- [ ] Review under the two-pass rule; merge.
+- [ ] Open finding above resolved; receipt at HEAD; merge.
