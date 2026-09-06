@@ -185,3 +185,46 @@ class TestSourceLimits:
         result = solve(constraints, 400, 500)
         assert isinstance(result, Infeasible)
         assert result.reason == "insufficient_resolution"
+
+
+class TestReviewPassOne:
+    """Reproductions from independent review of the first Stage 2 diff."""
+
+    def test_placement_is_optimized_not_midpointed(self):
+        """Reference-photo constraints admit min slack 0.5; the midpoint rule returned 0.429."""
+        from tests.test_plan import reference_measurements
+        from visaphoto.profiles import CN_VISA_DIGITAL, OutputSize, build_constraints
+
+        constraints, _ = build_constraints(
+            CN_VISA_DIGITAL, OutputSize(354, 472), reference_measurements()
+        )
+        result = solve(constraints, 354, 472)
+        assert isinstance(result, Solution)
+        assert result.min_slack == pytest.approx(0.5, abs=1e-3)
+
+    def test_rule_conflict_is_not_blamed_on_the_source(self):
+        """Face width needs scale >= 0.1759 while crown gap and eye placement together need
+        <= 0.1717. Each pairwise interval is non-empty; only their intersection is empty. That
+        must be reported as conflicting rules, naming them - not as a photograph that is too
+        small, which sends the user to retake a photo that would never comply."""
+        from tests.test_plan import reference_measurements
+        from visaphoto.profiles import CN_VISA_DIGITAL, OutputSize, build_constraints
+
+        m = reference_measurements(eye_line_y=1693.0)
+        m.image_width, m.image_height = 4000, 6000
+        constraints, _ = build_constraints(CN_VISA_DIGITAL, OutputSize(354, 472), m)
+        result = solve(constraints, 354, 472)
+        assert isinstance(result, Infeasible)
+        assert result.reason == "conflicting_requirements"
+        (lo_rule, hi_rule), = result.conflicting_rules
+        assert "face_width" in lo_rule
+        assert "crown_gap" in hi_rule or "eye_line" in hi_rule
+
+    def test_a_genuine_source_limit_is_still_reported_as_such(self):
+        constraints = [
+            Constraint(rule="head_height", a=1000.0, lo=990.0, hi=1000.0),
+            *containment(200, 300, 400, 500),
+        ]
+        result = solve(constraints, 400, 500)
+        assert isinstance(result, Infeasible)
+        assert result.reason == "source_too_small"

@@ -65,6 +65,11 @@ class Profile:
     retrieved: str
     sizes: tuple[OutputSize, ...]
     rules: tuple[Rule, ...]
+    physical_mm: tuple[float, float] | None = None
+    """Printed size, when the rules are stated in millimetres. Bounds in mm are converted to
+    output pixels through this and the output size before any constraint is built - a pixel
+    measurement compared against a millimetre bound rejects every photograph."""
+
     reference_size: OutputSize | None = None
     """The size at which pixel-denominated rules were stated. China gives its pixel figures
     "as an example" at 354x472 and never says whether they scale. We therefore apply them
@@ -160,6 +165,7 @@ CN_VISA_PAPER = Profile(
     source=CN_SHEET,
     retrieved="2026-09-04",
     sizes=(OutputSize(390, 567),),  # 33x48 mm at 300 dpi
+    physical_mm=(33.0, 48.0),
     rules=(
         Rule(
             key="head_height",
@@ -231,6 +237,27 @@ def build_constraints(
     unapplied: list[str] = []
     constraints: list[Constraint] = []
 
+    def to_px(rule: Rule, bound: float | None) -> float | None:
+        """A rule's bound in output pixels. Vertical rules use the vertical scale; the two agree
+        when the output size honours the printed aspect, and differ otherwise, which is itself
+        a profile error worth surfacing."""
+        if bound is None or rule.unit == "px":
+            return bound
+        if rule.unit != "mm":
+            raise ProfileError(f"{profile.key}/{rule.key}: unknown unit {rule.unit!r}")
+        if profile.physical_mm is None:
+            raise ProfileError(
+                f"{profile.key}/{rule.key} is stated in mm but the profile has no physical size"
+            )
+        width_mm, height_mm = profile.physical_mm
+        px_per_mm_x, px_per_mm_y = size.width / width_mm, size.height / height_mm
+        if abs(px_per_mm_x - px_per_mm_y) / px_per_mm_y > 0.01:
+            raise ProfileError(
+                f"{profile.key}: output {size.width}x{size.height} does not honour the printed "
+                f"aspect {width_mm}x{height_mm} mm"
+            )
+        return bound * px_per_mm_y
+
     crown = measurements.value("crown_y")
     chin = measurements.value("chin_y_landmark")
     eye_line = measurements.value("eye_line_y")
@@ -243,36 +270,36 @@ def build_constraints(
             if head_width is None:
                 unapplied.append(f"{rule.key}: head_width_silhouette is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=head_width, lo=rule.lo, hi=rule.hi))
+            constraints.append(Constraint(rule.key, a=head_width, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
         elif rule.key == "crown_gap":
             if crown is None:
                 unapplied.append(f"{rule.key}: crown_y is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=crown, b=-1.0, lo=rule.lo, hi=rule.hi))
+            constraints.append(Constraint(rule.key, a=crown, b=-1.0, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
         elif rule.key == "eye_line_from_bottom":
             if eye_line is None:
                 unapplied.append(f"{rule.key}: eye_line_y is unavailable")
                 continue
             constraints.append(Constraint(
-                rule.key, a=-eye_line, b=1.0, k=float(size.height), lo=rule.lo, hi=rule.hi
+                rule.key, a=-eye_line, b=1.0, k=float(size.height), lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)
             ))
         elif rule.key == "head_height":
             if crown is None or chin is None:
                 unapplied.append(f"{rule.key}: crown or chin is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=chin - crown, lo=rule.lo, hi=rule.hi))
+            constraints.append(Constraint(rule.key, a=chin - crown, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
         elif rule.key == "chin_to_bottom":
             if chin is None:
                 unapplied.append(f"{rule.key}: chin is unavailable")
                 continue
             constraints.append(Constraint(
-                rule.key, a=-chin, b=1.0, k=float(size.height), lo=rule.lo, hi=rule.hi
+                rule.key, a=-chin, b=1.0, k=float(size.height), lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)
             ))
         elif rule.key == "inter_eye_distance":
             if ied is None:
                 unapplied.append(f"{rule.key}: inter_eye_distance is unavailable")
                 continue
-            constraints.append(Constraint(rule.key, a=ied, lo=rule.lo, hi=rule.hi))
+            constraints.append(Constraint(rule.key, a=ied, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
         else:  # pragma: no cover - guards against a rule added without a handler
             unapplied.append(f"{rule.key}: no handler in this build")
 

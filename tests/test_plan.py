@@ -134,3 +134,31 @@ class TestChannelsDoNotBleed:
                 assert rule.quote.strip(), f"{profile.key}/{rule.key}"
             assert profile.source.startswith("http")
             assert profile.retrieved
+
+
+class TestPaperProfileUnits:
+    """Review pass one: millimetre bounds were compared against pixel measurements, so the paper
+    profile rejected the reference photograph as source_too_small."""
+
+    def test_paper_profile_admits_the_reference_photo(self):
+        plan = make_plan(CN_VISA_PAPER, reference_measurements())
+        assert plan.feasible, plan.to_dict()
+        assert 0.18 <= plan.chosen.outcome.scale <= 0.23
+
+    def test_paper_bounds_are_in_output_pixels(self):
+        constraints, _ = build_constraints(
+            CN_VISA_PAPER, OutputSize(390, 567), reference_measurements()
+        )
+        head_height = next(c for c in constraints if c.rule == "head_height")
+        px_per_mm = 567 / 48.0
+        assert head_height.lo == pytest.approx(28.0 * px_per_mm)
+        assert head_height.hi == pytest.approx(33.0 * px_per_mm)
+
+    def test_a_mismatched_output_aspect_is_a_profile_error(self):
+        from dataclasses import replace
+
+        from visaphoto.profiles import ProfileError
+
+        squashed = replace(CN_VISA_PAPER, sizes=(OutputSize(390, 400),))
+        with pytest.raises(ProfileError, match="does not honour the printed aspect"):
+            build_constraints(squashed, OutputSize(390, 400), reference_measurements())

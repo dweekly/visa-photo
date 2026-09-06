@@ -10,6 +10,9 @@ scales can step over an arbitrarily narrow feasible window and report a conflict
 exist - the worst failure available to a tool whose headline feature is telling you honestly
 when rules conflict.
 
+Every interval endpoint carries the rule that set it, so an infeasibility names the two rules
+that actually disagree rather than blaming the photograph's size by default.
+
 See docs/STAGE2-SOLVER.md for the derivation.
 """
 
@@ -24,6 +27,10 @@ from typing import Any, Iterable
 # elimination.
 EPS = 1e-9
 
+# Ternary-search iterations. Each shrinks the bracket by 2/3; 200 takes any pixel-scale
+# bracket far below EPS. Sound because both objectives searched are concave (see solve).
+_SEARCH_ITERATIONS = 200
+
 
 @dataclass(frozen=True)
 class Interval:
@@ -36,18 +43,35 @@ class Interval:
     def empty(self) -> bool:
         return self.lo > self.hi + EPS
 
-    @property
-    def width(self) -> float:
-        return max(0.0, self.hi - self.lo)
-
     def intersect(self, other: "Interval") -> "Interval":
         return Interval(max(self.lo, other.lo), min(self.hi, other.hi))
 
-    def clamp(self, value: float) -> float:
-        return min(max(value, self.lo), self.hi)
-
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"[{self.lo:.6g}, {self.hi:.6g}]"
+
+
+@dataclass(frozen=True)
+class _Tagged:
+    """An interval on ``s`` whose endpoints remember which rule set them."""
+
+    interval: Interval
+    lo_rule: str | None = None
+    hi_rule: str | None = None
+
+    def intersect(self, other: "_Tagged") -> "_Tagged":
+        if other.interval.lo > self.interval.lo:
+            lo, lo_rule = other.interval.lo, other.lo_rule
+        else:
+            lo, lo_rule = self.interval.lo, self.lo_rule
+        if other.interval.hi < self.interval.hi:
+            hi, hi_rule = other.interval.hi, other.hi_rule
+        else:
+            hi, hi_rule = self.interval.hi, self.hi_rule
+        return _Tagged(Interval(lo, hi), lo_rule, hi_rule)
+
+    @property
+    def empty(self) -> bool:
+        return self.interval.empty
 
 
 @dataclass(frozen=True)
@@ -55,9 +79,8 @@ class Constraint:
     """One published rule, as ``lo <= a*s + b*u + c*v + k <= hi``.
 
     ``rule`` identifies the source rule so an infeasibility can name it rather than saying
-    "infeasible". ``normalize`` is the positive scale used when comparing slack across
-    constraints measured in different units; it defaults to the band width so that slack is
-    expressed as a fraction of the room the rule allows.
+    "infeasible". Slack is normalized by the band width so it is a fraction of the room the
+    rule allows; one-sided rules normalize to 1.
     """
 
     rule: str
@@ -109,9 +132,18 @@ class _Bound:
         return self.offset + self.coefficient * s
 
 
+def _scale_band(con: Constraint) -> _Tagged:
+    """The interval on ``s`` imposed by an s-only constraint."""
+    lo = (con.lo - con.k) / con.a if con.lo is not None else -math.inf
+    hi = (con.hi - con.k) / con.a if con.hi is not None else math.inf
+    if con.a < 0:
+        lo, hi = hi, lo
+    return _Tagged(Interval(lo, hi), con.rule, con.rule)
+
+
 def _split(constraints: Iterable[Constraint], axis: str):
-    """Rearrange constraints into (s-only band, lower bounds, upper bounds) for one axis."""
-    s_only = Interval()
+    """Rearrange constraints into (tagged s-only band, lower bounds, upper bounds) for one axis."""
+    band = _Tagged(Interval())
     lowers: list[_Bound] = []
     uppers: list[_Bound] = []
     other = "c" if axis == "b" else "b"
@@ -121,14 +153,8 @@ def _split(constraints: Iterable[Constraint], axis: str):
         if getattr(con, other) != 0.0:
             continue  # belongs to the other axis
         if coeff == 0.0:
-            if con.a == 0.0:
-                continue  # constant; validated at construction
-            # lo <= a*s + k <= hi
-            lo = (con.lo - con.k) / con.a if con.lo is not None else -math.inf
-            hi = (con.hi - con.k) / con.a if con.hi is not None else math.inf
-            if con.a < 0:
-                lo, hi = hi, lo
-            s_only = s_only.intersect(Interval(lo, hi))
+            if con.a != 0.0:
+                band = band.intersect(_scale_band(con))
             continue
         # lo <= a*s + coeff*x + k <= hi  ->  bounds on x, linear in s
         if con.lo is not None:
@@ -137,48 +163,79 @@ def _split(constraints: Iterable[Constraint], axis: str):
         if con.hi is not None:
             bound = _Bound((con.hi - con.k) / coeff, -con.a / coeff, con.rule)
             (uppers if coeff > 0 else lowers).append(bound)
-    return s_only, lowers, uppers
+    return band, lowers, uppers
 
 
-def _pairwise_feasible_scales(
-    lowers: list[_Bound], uppers: list[_Bound]
-) -> tuple[Interval, list[tuple[str, str]]]:
+def _pairwise_feasible_scales(lowers: list[_Bound], uppers: list[_Bound]) -> _Tagged:
     """Scales for which some x satisfies every bound: ``L_i(s) <= U_j(s)`` for all pairs.
 
-    Each pair is linear in s, so it contributes an interval. This is the step that makes
-    feasibility exact - no scale is ever guessed at.
+    Each pair is linear in s, so it contributes an interval tagged with the pair of rules that
+    produced it. This is the step that makes feasibility exact - no scale is ever guessed at -
+    and tagging is what lets the final intersection say *which* pair lost.
     """
-    feasible = Interval()
-    blame: list[tuple[str, str]] = []
+    feasible = _Tagged(Interval())
     for lower in lowers:
         for upper in uppers:
+            tag = f"{lower.rule} & {upper.rule}"
             # (lower.offset - upper.offset) + (lower.coefficient - upper.coefficient)*s <= 0
             alpha = lower.offset - upper.offset
             beta = lower.coefficient - upper.coefficient
             if abs(beta) <= EPS:
-                if alpha > EPS:
-                    return Interval(1.0, -1.0), [(lower.rule, upper.rule)]
+                if alpha > EPS:  # impossible at every scale
+                    return _Tagged(Interval(1.0, -1.0), tag, tag)
                 continue
             limit = -alpha / beta
-            pair = Interval(-math.inf, limit) if beta > 0 else Interval(limit, math.inf)
-            merged = feasible.intersect(pair)
-            if merged.empty and not feasible.empty:
-                blame.append((lower.rule, upper.rule))
-            feasible = merged
-    return feasible, blame
+            pair = (_Tagged(Interval(-math.inf, limit), None, tag) if beta > 0
+                    else _Tagged(Interval(limit, math.inf), tag, None))
+            feasible = feasible.intersect(pair)
+    return feasible
 
 
-def _best_x(bounds_lo: list[_Bound], bounds_hi: list[_Bound], s: float) -> tuple[float, float]:
-    """Midpoint of the feasible interval for one axis at scale ``s``, and its width."""
-    lo = max((b.at(s) for b in bounds_lo), default=-math.inf)
-    hi = min((b.at(s) for b in bounds_hi), default=math.inf)
+def _placement_interval(lo_bounds: list[_Bound], hi_bounds: list[_Bound], s: float) -> Interval:
+    return Interval(
+        max((b.at(s) for b in lo_bounds), default=-math.inf),
+        min((b.at(s) for b in hi_bounds), default=math.inf),
+    )
+
+
+def _best_placement(
+    lo_bounds: list[_Bound], hi_bounds: list[_Bound], s: float,
+    softs: list[Constraint], axis: str,
+) -> float:
+    """The placement on one axis that maximizes the minimum normalized slack at scale ``s``.
+
+    Within the feasible interval every constraint holds; among those placements this picks the
+    one that sits furthest from its nearest soft limit. That is a max of a min of functions
+    linear in the placement - concave - so ternary search finds the true optimum. A midpoint
+    rule is not this: hard containment and differently normalized rules move the midpoint away
+    from the optimum, and the reference photograph lost 0.07 of slack to it.
+    """
+    span = _placement_interval(lo_bounds, hi_bounds, s)
+    lo, hi = span.lo, span.hi
     if lo == -math.inf and hi == math.inf:
-        return 0.0, math.inf
+        return 0.0
     if lo == -math.inf:
-        return hi, math.inf
+        return hi
     if hi == math.inf:
-        return lo, math.inf
-    return (lo + hi) / 2.0, hi - lo
+        return lo
+    relevant = [c for c in softs if getattr(c, axis) != 0.0]
+    if not relevant:
+        return (lo + hi) / 2.0
+
+    def objective(x: float) -> float:
+        u, v = (x, 0.0) if axis == "b" else (0.0, x)
+        return min(c.slack(s, u, v) for c in relevant)
+
+    for _ in range(_SEARCH_ITERATIONS):
+        if hi - lo < 1e-12:
+            break
+        a = lo + (hi - lo) / 3.0
+        b = hi - (hi - lo) / 3.0
+        if objective(a) < objective(b):
+            lo = a
+        else:
+            hi = b
+    return (lo + hi) / 2.0
 
 
 @dataclass
@@ -217,6 +274,48 @@ class Infeasible:
         }
 
 
+_SOURCE_PREFIX = "source_"
+
+
+def _is_source(tag: str | None) -> bool:
+    return tag is not None and all(
+        part.strip().startswith(_SOURCE_PREFIX) for part in tag.split("&")
+    )
+
+
+def _classify(feasible: _Tagged, output_width: int, output_height: int,
+              per_rule: dict[str, tuple[float, float]]) -> Infeasible:
+    """Name the two rules whose endpoints collided, and say what kind of failure that is.
+
+    A rule-versus-rule collision is a conflict in the destination's requirements for this
+    face; a collision involving the source image's edges means the photograph is framed too
+    tightly. They call for different remedies, so they must not be confused.
+    """
+    lo_rule, hi_rule = feasible.lo_rule or "?", feasible.hi_rule or "?"
+    lo, hi = feasible.interval.lo, feasible.interval.hi
+    if _is_source(lo_rule) and _is_source(hi_rule):
+        return Infeasible(
+            reason="source_too_small",
+            detail=(f"the {output_width}x{output_height} crop cannot fit inside the source "
+                    "image at any scale"),
+            conflicting_rules=[(lo_rule, hi_rule)], scale_bands=per_rule,
+        )
+    if _is_source(lo_rule) or _is_source(hi_rule):
+        return Infeasible(
+            reason="source_too_small",
+            detail=(f"a published rule and the source image's edges cannot both be satisfied "
+                    f"at {output_width}x{output_height}: {lo_rule} needs scale >= {lo:.5f}, "
+                    f"{hi_rule} needs scale <= {hi:.5f}"),
+            conflicting_rules=[(lo_rule, hi_rule)], scale_bands=per_rule,
+        )
+    return Infeasible(
+        reason="conflicting_requirements",
+        detail=(f"two published rules disagree at {output_width}x{output_height}: {lo_rule} "
+                f"needs scale >= {lo:.5f}, {hi_rule} needs scale <= {hi:.5f}"),
+        conflicting_rules=[(lo_rule, hi_rule)], scale_bands=per_rule,
+    )
+
+
 def solve(
     constraints: list[Constraint], output_width: int, output_height: int
 ) -> Solution | Infeasible:
@@ -227,54 +326,22 @@ def solve(
     vertical_band, v_lo, v_hi = _split(constraints, "b")
     horizontal_band, h_lo, h_hi = _split(constraints, "c")
 
-    scale_band = vertical_band.intersect(horizontal_band)
-    scale_band = scale_band.intersect(Interval(EPS, math.inf))
+    per_rule = {
+        con.rule: (_scale_band(con).interval.lo, _scale_band(con).interval.hi)
+        for con in constraints if con.b == 0.0 and con.c == 0.0 and con.a != 0.0
+    }
 
-    per_rule: dict[str, tuple[float, float]] = {}
-    for con in constraints:
-        if con.b == 0.0 and con.c == 0.0 and con.a != 0.0:
-            lo = (con.lo - con.k) / con.a if con.lo is not None else -math.inf
-            hi = (con.hi - con.k) / con.a if con.hi is not None else math.inf
-            if con.a < 0:
-                lo, hi = hi, lo
-            per_rule[con.rule] = (lo, hi)
-
-    if scale_band.empty:
-        names = list(per_rule)
-        return Infeasible(
-            reason="conflicting_requirements",
-            detail=(
-                "no single scale satisfies every size rule at "
-                f"{output_width}x{output_height}"
-            ),
-            conflicting_rules=[(names[i], names[j])
-                               for i in range(len(names)) for j in range(i + 1, len(names))],
-            scale_bands=per_rule,
-        )
-
-    vertical_scales, v_blame = _pairwise_feasible_scales(v_lo, v_hi)
-    horizontal_scales, h_blame = _pairwise_feasible_scales(h_lo, h_hi)
-    feasible = scale_band.intersect(vertical_scales).intersect(horizontal_scales)
-
+    feasible = (
+        _Tagged(Interval(EPS, math.inf), "scale must be positive", None)
+        .intersect(vertical_band)
+        .intersect(horizontal_band)
+        .intersect(_pairwise_feasible_scales(v_lo, v_hi))
+        .intersect(_pairwise_feasible_scales(h_lo, h_hi))
+    )
     if feasible.empty:
-        blame = v_blame + h_blame
-        return Infeasible(
-            reason="conflicting_requirements" if blame else "source_too_small",
-            detail=(
-                f"no crop at {output_width}x{output_height} satisfies every rule; "
-                "the scale bands do not overlap once placement is accounted for"
-            ),
-            conflicting_rules=blame,
-            scale_bands=per_rule,
-        )
+        return _classify(feasible, output_width, output_height, per_rule)
 
-    def objective(s: float) -> float:
-        u, _ = _best_x(v_lo, v_hi, s)
-        v, _ = _best_x(h_lo, h_hi, s)
-        soft = [c.slack(s, u, v) for c in constraints if not c.hard]
-        return min(soft) if soft else 0.0
-
-    lo, hi = feasible.lo, feasible.hi
+    lo, hi = feasible.interval.lo, feasible.interval.hi
     if not math.isfinite(lo) or not math.isfinite(hi):
         return Infeasible(
             reason="insufficient_resolution",
@@ -282,10 +349,20 @@ def solve(
             scale_bands=per_rule,
         )
 
-    # Ternary search. Sound here where sampling was not for feasibility: with feasibility
-    # already decided exactly, the objective is a max of a min of linear functions and is
-    # therefore concave in s, so this converges on the true optimum.
-    for _ in range(200):
+    softs = [c for c in constraints if not c.hard]
+
+    def placed(s: float) -> tuple[float, float]:
+        return (_best_placement(v_lo, v_hi, s, softs, "b"),
+                _best_placement(h_lo, h_hi, s, softs, "c"))
+
+    def objective(s: float) -> float:
+        u, v = placed(s)
+        return min((c.slack(s, u, v) for c in softs), default=0.0)
+
+    # Ternary search over scale. Sound here where sampling was not for feasibility: with the
+    # feasible interval already decided exactly, the objective - a max over placement of a min
+    # of linear functions - is concave in s, so this converges on the true optimum.
+    for _ in range(_SEARCH_ITERATIONS):
         if hi - lo < 1e-12:
             break
         a = lo + (hi - lo) / 3.0
@@ -295,18 +372,12 @@ def solve(
         else:
             hi = b
     s = (lo + hi) / 2.0
-    u, _ = _best_x(v_lo, v_hi, s)
-    v, _ = _best_x(h_lo, h_hi, s)
+    u, v = placed(s)
 
     slacks = {c.rule: c.slack(s, u, v) for c in constraints}
-    soft = [value for rule, value in slacks.items()
-            if not any(c.rule == rule and c.hard for c in constraints)]
     return Solution(
-        scale=s,
-        crop_x=v / s,
-        crop_y=u / s,
-        output_width=output_width,
-        output_height=output_height,
-        min_slack=min(soft) if soft else 0.0,
+        scale=s, crop_x=v / s, crop_y=u / s,
+        output_width=output_width, output_height=output_height,
+        min_slack=min((slacks[c.rule] for c in softs), default=0.0),
         slacks=slacks,
     )
