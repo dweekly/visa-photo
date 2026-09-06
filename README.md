@@ -3,7 +3,8 @@
 Turn an ordinary portrait into a photo that satisfies a specific country's visa or passport
 photo rules — and, just as importantly, tell you honestly when it can't.
 
-**Status: early. Stage 0 of 5 complete.** Nothing here is usable yet. See [ROADMAP.md](ROADMAP.md).
+**Status: early. Stage 1 of 5 complete** — it measures a portrait and checks it against sourced
+requirements, but does not yet produce a photo. See [ROADMAP.md](ROADMAP.md).
 
 ## The problem this solves
 
@@ -70,7 +71,7 @@ report is evidence, not a promise of acceptance.
 |---|---|
 | [docs/PLAN.md](docs/PLAN.md) | The full design and staged delivery plan. Fresh as of 2026-09-06. |
 | [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md) | Approaches that failed, so they aren't retried. Fresh as of 2026-09-04. |
-| [ROADMAP.md](ROADMAP.md) | Stack-ranked next steps. Fresh as of 2026-09-04. |
+| [ROADMAP.md](ROADMAP.md) | Stack-ranked next steps. Fresh as of 2026-09-06. |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing changes per release. |
 | [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) | Licences of bundled models and libraries. Fresh as of 2026-09-04. |
 

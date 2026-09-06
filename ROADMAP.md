@@ -1,6 +1,6 @@
 # Roadmap
 
-Stack-ranked. Cited from [README.md](README.md). Fresh as of 2026-09-04.
+Stack-ranked. Cited from [README.md](README.md). Fresh as of 2026-09-06.
 Full design in [docs/PLAN.md](docs/PLAN.md).
 
 ## Stages
@@ -8,13 +8,21 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
 - ~~**Stage 0 — spike: does MediaPipe run?**~~ Done 2026-09-04. Gate passed on mediapipe 0.10.21;
   1.0.x is unusable (see [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md)). Diagnostic retained at
   `tools/spikes/mediapipe_smoke.py`.
-- **Stage 1 — measurement and capability matrix.** Eye centres, chin, crown from the segmentation
-  matte, pose. Each measurement declares which backend supplies it, its uncertainty, and when it
-  returns *unavailable*. A minimal CLI lands here so end-to-end verification starts early rather
-  than at the end.
-- **Stage 2 — spec schema and geometry solver.** Typed measurements; named interpretation rule
-  sets; per-channel operation policy; exact interval feasibility with named conflicting rules on
-  failure.
+- ~~**Stage 1 — measurement.**~~ Merged 2026-09-06 (PR #1). Eye centres, chin, crown, pose,
+  expression and eye-region signals, checked against sourced requirements. Shipped *without* the
+  capability matrix the plan required, at the cost of six review passes finding one defect class;
+  see Stage 1b.
+- **Stage 2 — spec schema and geometry solver.** Built (PR #2): exact interval feasibility, China
+  digital and paper profiles, `--spec`. Reproduced the hand-built crop to 0.14%. Awaiting review
+  and merge.
+- **Stage 1b — precondition-driven measurement.** A measurement is unavailable unless every gate
+  it declares is affirmatively true; the registry is the only construction path; gates form an
+  acyclic graph evaluated before anything is emitted; observed and anatomical quantities are
+  separate tiers. Design and verification in [docs/PLAN.md](docs/PLAN.md) → Measurement. Lands
+  after Stage 2, before Stage 3.
+- **Calibration beyond one subject.** MST-E, then the Chicago Face Database, then consenting
+  volunteers for the matched failure conditions no dataset covers. Sources, terms and the analysis
+  design are in [docs/PLAN.md](docs/PLAN.md) → Calibration. After Stage 1b.
 - **Stage 3 — render and encode.** Crop, background replacement *where the channel permits it*,
   resize, and a bounded encoder search against format, colour-space and byte-band constraints.
 - **Stage 4 — validator and report contract.** Per-criterion pass / fail / indeterminate /
