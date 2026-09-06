@@ -126,7 +126,7 @@ CN_VISA_DIGITAL = Profile(
                 "The space from the upper edge of the image to the crown of the head should "
                 "be 10 - 70 pixels."
             ),
-            measurement="crown_y",
+            measurement="matte_top_row",
             lo=10.0, hi=70.0,
             note="The diagram on the same sheet says 10-85 px. Body text used.",
         ),
@@ -188,7 +188,7 @@ CN_VISA_PAPER = Profile(
                 "The space between the crown and the upper edge of the photo should be "
                 "between 3 mm and 5 mm."
             ),
-            measurement="crown_y",
+            measurement="matte_top_row",
             lo=3.0, hi=5.0, unit="mm",
         ),
         Rule(
@@ -197,7 +197,7 @@ CN_VISA_PAPER = Profile(
                 "The space between the chin and the bottom edge of the photo should be "
                 ">= 7 mm."
             ),
-            measurement="chin_y",
+            measurement="chin_landmark_y",
             lo=7.0, unit="mm",
         ),
     ),
@@ -258,8 +258,10 @@ def build_constraints(
             )
         return bound * px_per_mm_y
 
-    crown = measurements.value("crown_y")
-    chin = measurements.value("chin_y_landmark")
+    # Observed-tier names. A profile binds to what was observed - the top row of the matte,
+    # the chin vertex the mesh placed - and says so; see docs/STAGE1B-PRECONDITIONS.md.
+    crown = measurements.value("matte_top_row")
+    chin = measurements.value("chin_landmark_y")
     eye_line = measurements.value("eye_line_y")
     eye_x = measurements.value("eye_mid_x")
     head_width = measurements.value("head_width_silhouette")
@@ -273,7 +275,7 @@ def build_constraints(
             constraints.append(Constraint(rule.key, a=head_width, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
         elif rule.key == "crown_gap":
             if crown is None:
-                unapplied.append(f"{rule.key}: crown_y is unavailable")
+                unapplied.append(f"{rule.key}: matte_top_row is unavailable")
                 continue
             constraints.append(Constraint(rule.key, a=crown, b=-1.0, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
         elif rule.key == "eye_line_from_bottom":
@@ -285,12 +287,12 @@ def build_constraints(
             ))
         elif rule.key == "head_height":
             if crown is None or chin is None:
-                unapplied.append(f"{rule.key}: crown or chin is unavailable")
+                unapplied.append(f"{rule.key}: matte_top_row or chin_landmark_y is unavailable")
                 continue
             constraints.append(Constraint(rule.key, a=chin - crown, lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)))
         elif rule.key == "chin_to_bottom":
             if chin is None:
-                unapplied.append(f"{rule.key}: chin is unavailable")
+                unapplied.append(f"{rule.key}: chin_landmark_y is unavailable")
                 continue
             constraints.append(Constraint(
                 rule.key, a=-chin, b=1.0, k=float(size.height), lo=to_px(rule, rule.lo), hi=to_px(rule, rule.hi)

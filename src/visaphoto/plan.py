@@ -19,12 +19,18 @@ class SizeAttempt:
     size: OutputSize
     outcome: Solution | Infeasible | None
     skipped: str | None = None
+    """This size was not attempted, by policy (e.g. pixel rules stated at another size)."""
+    blocked: str | None = None
+    """This size could not be attempted because a rule's measurement is unavailable. Distinct
+    from skipped (policy) and from Infeasible (the rules conflict for this face): the remedy
+    here is a photo the measurement can be made on, and the rule is named."""
     unapplied: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "size": {"width": self.size.width, "height": self.size.height},
             "skipped": self.skipped,
+            "blocked": self.blocked,
             "unapplied_rules": self.unapplied,
             "outcome": self.outcome.to_dict() if self.outcome else None,
         }
@@ -61,6 +67,15 @@ def make_plan(profile: Profile, measurements: MeasurementSet) -> Plan:
             constraints, unapplied = build_constraints(profile, size, measurements)
         except ProfileError as exc:
             attempts.append(SizeAttempt(size=size, outcome=None, skipped=str(exc)))
+            continue
+        if unapplied:
+            # Never solve with a rule silently dropped. A crop that satisfies every rule we
+            # could apply is not a crop that satisfies the profile, and the report must not
+            # suggest otherwise - nor call this a conflict between rules.
+            attempts.append(SizeAttempt(
+                size=size, outcome=None, unapplied=unapplied,
+                blocked="cannot solve with the available measurements: " + "; ".join(unapplied),
+            ))
             continue
         outcome = solve(constraints, size.width, size.height)
         attempts.append(SizeAttempt(size=size, outcome=outcome, unapplied=unapplied))

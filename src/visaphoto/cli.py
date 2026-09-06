@@ -80,6 +80,8 @@ def _render_plan(plan) -> None:
         label = f"{attempt.size.width}x{attempt.size.height}"
         if attempt.skipped:
             print(f"  {label:<10} skipped   {attempt.skipped}")
+        elif attempt.blocked:
+            print(f"  {label:<10} BLOCKED   {attempt.blocked}")
         elif isinstance(attempt.outcome, Infeasible):
             print(f"  {label:<10} NO CROP   {attempt.outcome.detail}")
             for left, right in attempt.outcome.conflicting_rules[:4]:

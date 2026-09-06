@@ -4,8 +4,8 @@ Working plan for the stage. The *why* and the invariant are in [PLAN.md](PLAN.md
 and are not repeated here; this document is the concrete gate graph, the registry, and the
 sequence. Fresh as of 2026-09-06.
 
-**Where:** worktree `~/dev/visa-photo-preconditions`, branch `stage1b-preconditions`. Tracking PR
-opened with this commit. Rebases onto `main` once Stage 2 (PR #2) merges.
+**Where:** worktree `~/dev/visa-photo-preconditions`, branch `stage1b-preconditions`. Tracking PR #3.
+Rebased onto `main` after Stage 2 (PR #2) merged 2026-09-06.
 
 ## The gate graph
 
@@ -114,9 +114,9 @@ One PR, commits in this order, each pushed when green.
       positive case; both `False` and `None` per gate; complete name set per run configuration.
 - [x] Cheek patch redefinition; re-derived the eleven ratios: obscured 0.30-0.44, not obscured
       0.63-0.85, threshold 0.53. Calibration tests updated to that.
-- [ ] Solver consumer refusal: `build_constraints` reports *cannot solve with available
+- [x] Solver consumer refusal: `build_constraints` reports *cannot solve with available
       measurements* naming the rule; planner surfaces it; one CLI test.
-- [ ] Posed-set gate tests (8847 yaw, 8850, 8853 shades, 8864); reference regression (493, 1320,
+- [x] Posed-set gate tests (8847 yaw, 8850, 8853 shades, 8864); reference regression (493, 1320,
       495, 1086); `NEGATIVE_RESULTS.md`, `ROADMAP.md`, `CHANGELOG.md`.
 
 ## Acceptance

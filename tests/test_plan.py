@@ -10,14 +10,14 @@ from __future__ import annotations
 import pytest
 
 from visaphoto.geometry import Infeasible, Solution
-from visaphoto.measurements import Confidence, Measurement, MeasurementSet, Status
+from visaphoto.measurements import Confidence, Measurement, MeasurementSet, Precondition, Status
 from visaphoto.plan import make_plan
 from visaphoto.profiles import CN_VISA_DIGITAL, CN_VISA_PAPER, OutputSize, build_constraints
 
 # As measured on the reference portrait, 2316x3088.
 REFERENCE = {
-    "crown_y": 493.0,
-    "chin_y_landmark": 2278.2,
+    "matte_top_row": 493.0,
+    "chin_landmark_y": 2278.2,
     "eye_line_y": 1319.7,
     "eye_mid_x": 1223.6,
     "inter_eye_distance": 494.6,
@@ -31,12 +31,14 @@ def reference_measurements(**overrides) -> MeasurementSet:
     for name, value in values.items():
         if value is None:
             result.add(Measurement(
-                name=name, definition="d", status=Status.UNAVAILABLE, reason="withheld"
+                name=name, definition="d", status=Status.UNAVAILABLE,
+                preconditions=(Precondition("image_decoded", False, "withheld"),),
             ))
             continue
         result.add(Measurement(
             name=name, definition="d", status=Status.AVAILABLE, value=value,
             unit="px", backend="stage1", confidence=Confidence.MEASURED,
+            preconditions=(Precondition("image_decoded", True, "ok"),),
         ))
     return result
 
@@ -83,16 +85,32 @@ class TestChinaDigital:
 
 
 class TestUnavailableMeasurements:
-    def test_a_missing_crown_disables_only_its_rule(self):
-        plan = make_plan(CN_VISA_DIGITAL, reference_measurements(crown_y=None))
-        assert plan.feasible
-        assert any("crown_gap" in u for u in plan.chosen.unapplied)
-        assert "crown_gap" not in plan.chosen.outcome.slacks
+    """Stage 1b's downstream contract: an unavailable measurement is never solved around.
 
-    def test_unapplied_rules_are_reported_not_dropped(self):
+    Before this, a missing crown made crown_gap "unapplied" and the solve proceeded without
+    it - producing a crop that satisfied every rule we could apply and none of the ones we
+    could not, presented as a plan. Reproduced live on the reference photo after the Stage 1b
+    renames: crop y moved from 302 to 588 with no warning."""
+
+    def test_a_missing_crown_blocks_the_size_and_names_the_rule(self):
+        plan = make_plan(CN_VISA_DIGITAL, reference_measurements(matte_top_row=None))
+        assert not plan.feasible
+        attempt = next(a for a in plan.attempts if a.size.width == 354)
+        assert attempt.outcome is None
+        assert "crown_gap" in attempt.blocked and "matte_top_row" in attempt.blocked
+        assert "conflict" not in attempt.blocked.lower()
+
+    def test_a_missing_width_blocks_rather_than_dropping_face_width(self):
         plan = make_plan(CN_VISA_DIGITAL, reference_measurements(head_width_silhouette=None))
-        assert plan.chosen.unapplied
-        assert any("face_width" in u for u in plan.chosen.unapplied)
+        assert not plan.feasible
+        attempt = next(a for a in plan.attempts if a.size.width == 354)
+        assert "face_width" in attempt.blocked
+
+    def test_blocked_is_distinct_from_skipped_and_infeasible(self):
+        plan = make_plan(CN_VISA_DIGITAL, reference_measurements(matte_top_row=None))
+        by_size = {a.size.width: a for a in plan.attempts}
+        assert by_size[354].blocked and not by_size[354].skipped
+        assert by_size[420].skipped and not by_size[420].blocked
 
 
 class TestInfeasibility:
