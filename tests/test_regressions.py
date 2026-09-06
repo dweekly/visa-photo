@@ -1,216 +1,283 @@
-"""Regressions for defects found by independent review of the Stage 1 diff.
+"""Inventory reproductions, driven through the production pipeline.
 
-Each test reproduces the reviewer's scenario. Both defects shared a shape worth naming: the
-code produced a confident, wrong answer where it should have produced either a warning or an
-explicit "unavailable".
+Every test here goes through `evaluate.measure_all` with synthetic raw fits - the same path
+the CLI takes after the models have run. Nothing calls a helper directly. An earlier
+regression called a helper the production path never invoked, passed, and shipped the bug;
+this file exists so that cannot recur.
+
+Each defect has a paired positive case with the defect removed, so a test cannot pass merely
+because every measurement was already blocked by something else.
 """
 
 from __future__ import annotations
 
-import pathlib
+import math
 
 import numpy as np
+import pytest
 
-from visaphoto.backends.segmentation import head_width_between
-from visaphoto.preflight import Outcome, run
-from visaphoto.requirements import for_jurisdiction
-from tests.test_preflight import EYES_SHUT, NEUTRAL, make_set, outcome_for
+from visaphoto.backends.landmarks import (
+    IDX_CHIN, IDX_IRIS_LEFT, IDX_IRIS_RIGHT, IDX_OVAL_LEFT, IDX_OVAL_RIGHT, LandmarkFit,
+)
+from visaphoto.backends.segmentation import NOT_ATTEMPTED, MatteFit
+from visaphoto.evaluate import measure_all
+from visaphoto.measurements import Status
+from visaphoto.registry import REGISTRY
 
-
-class TestClosedEyesAreNotSilentlyAccepted:
-    """China's rule is 'neutral with eyes open, mouth closed'. Inferring which signals a
-    requirement covers from substrings in its key dropped the eyes-open half, so a photo with
-    closed eyes passed and the CLI exited 0."""
-
-    def test_closed_eyes_warn_for_china(self):
-        report = run(make_set(), EYES_SHUT, jurisdiction="CN")
-        assert outcome_for(report, "expression_neutral") is Outcome.WARN
-        assert report.warnings, "closed eyes must not exit cleanly for CN"
-
-    def test_neutral_still_passes(self):
-        report = run(make_set(), NEUTRAL, jurisdiction="CN")
-        assert outcome_for(report, "expression_neutral") is Outcome.LIKELY_OK
-
-    def test_every_advisory_requirement_declares_its_signals(self):
-        """The root cause, guarded directly: an advisory requirement with no declared signals
-        silently evaluates nothing."""
-        from visaphoto.requirements import GENERIC_ADVISORIES, REQUIREMENTS, Check
-
-        for requirement in (*REQUIREMENTS, *GENERIC_ADVISORIES):
-            if requirement.check is Check.ADVISORY_SIGNAL:
-                assert requirement.signals, f"{requirement.key} assesses nothing"
-
-    def test_chinas_requirement_covers_every_clause_it_quotes(self):
-        """The quote names three things. All three must be checked."""
-        (requirement,) = [
-            r for r in for_jurisdiction("CN") if r.key == "expression_neutral"
-        ]
-        assert "eyes open" in requirement.quote
-        assert "mouth closed" in requirement.quote
-        assert set(requirement.signals) >= {"smile", "mouth_open", "eyes_closed"}
+W, H = 600, 800
+NEUTRAL = {"eyeBlinkLeft": 0.15, "eyeBlinkRight": 0.07, "mouthSmileLeft": 0.0,
+           "mouthSmileRight": 0.0, "jawOpen": 0.03}
+IDENTITY = tuple(tuple(1.0 if i == j else 0.0 for j in range(4)) for i in range(4))
 
 
-class TestHeadWidthIsBoundedByTheHead:
-    """Sampling the upper quarter of the whole subject made the identical head measure 192px
-    in a head-and-shoulders frame and 300px in a full-length one - reporting shoulder width as
-    a measured head width."""
-
-    @staticmethod
-    def matte() -> np.ndarray:
-        solid = np.zeros((1220, 600), dtype=bool)
-        solid[20:220, 200:400] = True   # head, 200 px wide
-        solid[220:1220, 150:450] = True  # torso, 300 px wide
-        return solid
-
-    def test_same_head_measures_the_same_in_any_frame(self):
-        solid = self.matte()
-        short, _ = head_width_between(solid[:320], 20, 120.0, 219.0)
-        tall, _ = head_width_between(solid, 20, 120.0, 219.0)
-        assert short == tall == 200
-
-    def test_torso_width_never_reported_as_head_width(self):
-        width, _ = head_width_between(self.matte(), 20, 120.0, 219.0)
-        assert width != 300
-
-    def test_missing_chin_yields_unavailable_not_a_guess(self):
-        width, reason = head_width_between(self.matte(), 20, 120.0, None)
-        assert width is None
-        assert "chin or eye-line position is unavailable" in reason
-
-    def test_chin_above_crown_is_rejected(self):
-        width, reason = head_width_between(self.matte(), 500, 450.0, 219.0)
-        assert width is None
-        assert "not below the crown" in reason
-
-    def test_empty_band_yields_unavailable(self):
-        width, reason = head_width_between(np.zeros((100, 100), dtype=bool), 0, 25.0, 50.0)
-        assert width is None
-        assert "no solid rows" in reason
+def yaw_matrix(degrees: float):
+    t = math.radians(degrees)
+    c, s = math.cos(t), math.sin(t)
+    # Rotation about the vertical (y) axis, as a 4x4 with unit scale.
+    return ((c, 0.0, s, 0.0), (0.0, 1.0, 0.0, 0.0), (-s, 0.0, c, 0.0), (0.0, 0.0, 0.0, 1.0))
 
 
-class TestMatteNoiseAndClipping:
-    """Second review pass. Both defects reported a confident number where the honest answer
-    was 'unavailable' or 'that pixel is not part of the head'."""
-
-    @staticmethod
-    def head_matte() -> np.ndarray:
-        solid = np.zeros((300, 400), dtype=bool)
-        solid[20:220, 100:300] = True  # 200 px wide head
-        return solid
-
-    def run_measure(self, matte):
-        """Exercise segmentation.measure end to end with a synthetic matte.
-
-        rembg is stubbed so no model download or inference happens; everything else - the
-        component isolation, the crown guard, the band bounds, the clipping guard - is the
-        real production path.
-        """
-        import numpy as np
-        import rembg
-        from PIL import Image
-
-        from visaphoto.backends import segmentation
-
-        rgba = np.zeros((*matte.shape, 4), dtype=np.uint8)
-        rgba[..., 3] = np.where(matte, 255, 0)
-
-        import pytest
-
-        result = self._result()
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(segmentation, "model_path", lambda: pathlib.Path(__file__))
-            patch.setattr(rembg, "new_session", lambda *a, **k: None)
-            patch.setattr(rembg, "remove", lambda *a, **k: Image.fromarray(rgba, "RGBA"))
-            segmentation.measure(Image.new("RGB", (matte.shape[1], matte.shape[0])), result)
-        return result
-
-    def _result(self, eye_x=200.0, eye_y=120.0, chin=219.0):
-        from visaphoto.measurements import Confidence, Measurement, MeasurementSet, Status
-
-        r = MeasurementSet(source="synthetic", image_width=400, image_height=300)
-        for name, value in (("eye_mid_x", eye_x), ("eye_line_y", eye_y),
-                            ("chin_y_landmark", chin)):
-            r.add(Measurement(
-                name=name, definition="d", status=Status.AVAILABLE, value=value,
-                unit="px", backend="synthetic", confidence=Confidence.MEASURED,
-            ))
-        return r
-
-    def test_one_stray_pixel_does_not_inflate_head_width(self):
-        """A single detached foreground pixel near the frame edge took 200 px to 291 px.
-
-        Driven through segmentation.measure, not through the helper. An earlier version of
-        this test called the helper directly, so it passed while the production path never
-        invoked the helper at all - the fix was written and silently not wired in."""
-        clean = self.run_measure(self.head_matte())
-        assert clean.value("head_width_silhouette") == 200
-
-        noisy = self.head_matte()
-        noisy[60, 390] = True
-        measured = self.run_measure(noisy)
-        assert measured.value("head_width_silhouette") == 200, (
-            "segmentation noise must not be measured as anatomy"
-        )
-
-    def test_a_speck_above_the_head_does_not_become_the_crown(self):
-        """A detached 10px speck moved the measured crown from y=20 to y=5."""
-        speckled = self.head_matte()
-        speckled[5:8, 40:50] = True
-        assert self.run_measure(speckled).value("crown_y") == 20
-
-    def test_head_clipped_at_the_side_is_unavailable(self):
-        """Cropping through the hair leaves both eyes visible, so landmarks cannot catch it."""
-        clipped = self.head_matte()[:, 150:]
-        width, reason = head_width_between(clipped, 20, 120.0, 219.0)
-        assert width is None
-        assert "left or right edge" in reason
-
-    def test_uncropped_head_still_measures(self):
-        width, reason = head_width_between(self.head_matte(), 20, 120.0, 219.0)
-        assert width == 200 and reason is None
+GIMBAL = ((0.0, 0.0, 1.0, 0.0), (0.0, 1.0, 0.0, 0.0), (-1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
 
 
-class TestNoDetectedProblemIsHidden:
-    """US and NZ have no transcribed expression rule, so closed eyes were detected and then
-    reported nowhere: zero warnings, exit 0, while the identical input warned for CN."""
-
-    def test_closed_eyes_warn_in_every_supported_mode(self):
-        for code in ("CN", "US", "EU", "NZ", None):
-            report = run(make_set(), EYES_SHUT, jurisdiction=code)
-            assert report.warnings, f"closed eyes produced no warning for {code}"
-
-    def test_generic_fallbacks_are_labelled_generic(self):
-        """A borrowed advisory must never look like that country's own law."""
-        report = run(make_set(), EYES_SHUT, jurisdiction="US")
-        borrowed = [f for f in report.findings if f.requirement.key.startswith("generic_")]
-        assert borrowed
-        assert all("GENERIC" in f.requirement.jurisdictions for f in borrowed)
-
-    def test_china_is_not_given_a_duplicate_expression_advisory(self):
-        """CN states its own expression rule; the generic one must not be added on top."""
-        keys = [f.requirement.key for f in run(make_set(), EYES_SHUT, jurisdiction="CN").findings]
-        assert "expression_neutral" in keys
-        assert "generic_expression_neutral" not in keys
+def landmarks(*, left=(200.0, 300.0), right=(400.0, 300.0), chin=(300.0, 520.0),
+              oval_left=(150.0, 350.0), oval_right=(450.0, 350.0), blendshapes=NEUTRAL,
+              matrix=IDENTITY, faces=1, error=None, count=478) -> LandmarkFit:
+    if faces != 1:
+        return LandmarkFit(faces, None, None, None, "test", error)
+    pts = [(300.0, 400.0)] * count
+    for idx, p in ((IDX_IRIS_LEFT, left), (IDX_IRIS_RIGHT, right), (IDX_CHIN, chin),
+                   (IDX_OVAL_LEFT, oval_left), (IDX_OVAL_RIGHT, oval_right)):
+        if idx < count:
+            pts[idx] = p
+    return LandmarkFit(1, tuple(pts), blendshapes, matrix, "test")
 
 
-class TestTruncatedCrownAlsoBlocksWidth:
-    """Fifth review pass. The top-edge guard marked both measurements unavailable and then
-    fell through, overwriting the width with the visible extent. The widest part of a head is
-    the hair near the crown, so a truncated crown means the visible width is a lower bound,
-    not a measurement."""
+def matte(*, top=100, bottom=700, left=150, right=450, extra=()) -> MatteFit:
+    alpha = np.zeros((H, W), dtype=np.uint8)
+    alpha[top:bottom, left:right] = 255
+    for (r, c) in extra:
+        alpha[r, c] = 255
+    return MatteFit(True, True, alpha, "test")
 
-    def test_width_stays_unavailable_when_the_crown_is_cut_off(self):
-        matte = np.zeros((300, 400), dtype=bool)
-        matte[0:220, 100:300] = True  # runs off the top edge
-        result = TestMatteNoiseAndClipping().run_measure(matte)
-        assert result.get("crown_y").status.value == "unavailable"
-        assert result.get("head_width_silhouette").status.value == "unavailable", (
-            "a head whose crown is outside the frame has no measurable width"
-        )
 
-    def test_an_untruncated_head_still_measures_both(self):
-        matte = np.zeros((300, 400), dtype=bool)
-        matte[20:220, 100:300] = True
-        result = TestMatteNoiseAndClipping().run_measure(matte)
-        assert result.value("crown_y") == 20
-        assert result.value("head_width_silhouette") == 200
+def pixels(level: int = 128, eye_level: int | None = None):
+    px = np.full((H, W, 3), level, dtype=np.uint8)
+    if eye_level is not None:
+        px[240:360, 120:480] = eye_level  # darken the whole eye band
+    return px
+
+
+def run(lm=None, m=None, px=None, segmentation=True):
+    return measure_all(px if px is not None else pixels(),
+                       lm if lm is not None else landmarks(),
+                       m if m is not None else matte(),
+                       source="synthetic", segmentation_attempted=segmentation)
+
+
+def blockers(result, name):
+    meas = result.get(name)
+    return {p.id for p in meas.blockers_false}, {p.id for p in meas.blockers_unknown}
+
+
+class TestCompleteSetEveryRun:
+    """"Every emitted measurement matches the registry" passes when nothing is emitted.
+    This asserts the whole set is present in every run configuration."""
+
+    @pytest.mark.parametrize("config", ["normal", "no_face", "two_faces", "model_failed",
+                                        "no_segmentation"])
+    def test_every_registry_name_is_present(self, config):
+        if config == "normal":
+            r = run()
+        elif config == "no_face":
+            r = run(lm=landmarks(faces=0))
+        elif config == "two_faces":
+            r = run(lm=landmarks(faces=2))
+        elif config == "model_failed":
+            r = run(lm=landmarks(faces=-1, error="boom"))
+        else:
+            r = run(m=NOT_ATTEMPTED, segmentation=False)
+        assert set(r.measurements) == set(REGISTRY)
+
+    def test_a_good_synthetic_photo_measures_the_observed_tier(self):
+        r = run()
+        for name, spec in REGISTRY.items():
+            if spec.tier.value == "observed":
+                assert r.status(name) is Status.AVAILABLE, (name, r.get(name).reason)
+        assert r.value("eye_line_y") == 300.0
+        assert r.value("inter_eye_distance") == 200.0
+        assert r.value("matte_top_row") == 100.0
+        assert r.value("head_width_silhouette") == 300.0
+
+    def test_no_face_makes_everything_unavailable_by_a_false_gate(self):
+        r = run(lm=landmarks(faces=0))
+        assert r.gate_record["face_detected_one"].satisfied is False
+        assert all(r.status(n) is not Status.AVAILABLE for n in REGISTRY)
+
+    def test_model_failure_is_none_not_false(self):
+        r = run(lm=landmarks(faces=-1, error="landmarker failed"))
+        assert r.gate_record["face_detected_one"].satisfied is None
+        assert "landmarker failed" in r.gate_record["face_detected_one"].detail
+
+    def test_no_segmentation_is_not_attempted_not_unavailable(self):
+        r = run(m=NOT_ATTEMPTED, segmentation=False)
+        for name in ("matte_top_row", "head_width_silhouette", "anatomical_crown_y"):
+            assert r.status(name) is Status.NOT_ATTEMPTED
+        assert r.status("eye_line_y") is Status.AVAILABLE
+
+
+class TestInventoryReproductions:
+    def test_a_tuft_touching_the_top_edge_is_not_a_crown(self):
+        """Stage 1's guard required top == 0 AND a wide first row; a narrow tuft at row 0 passed
+        it and reported crown_y = 0 as measured."""
+        tuft = [(0, c) for c in range(290, 310)] + [(r, c) for r in range(1, 100) for c in (300,)]
+        r = run(m=matte(extra=tuft))
+        assert r.status("matte_top_row") is Status.UNAVAILABLE
+        assert blockers(r, "matte_top_row")[0] == {"matte_clear_of_top_edge"}
+        assert r.status("head_width_silhouette") is Status.UNAVAILABLE
+
+    def test_paired_untouched_top_edge_measures(self):
+        r = run(m=matte(top=5))
+        assert r.value("matte_top_row") == 5.0
+
+    def test_gimbal_lock_does_not_fabricate_roll(self):
+        r = run(lm=landmarks(matrix=GIMBAL))
+        assert r.status("pose_roll") is Status.UNAVAILABLE
+        assert blockers(r, "pose_roll")[0] == {"pose_decomposition_valid"}
+        assert "gimbal" in r.gate_record["pose_decomposition_valid"].detail
+
+    def test_paired_identity_matrix_measures_pose(self):
+        r = run()
+        assert r.value("pose_roll") == pytest.approx(0.0)
+
+    def test_nonfinite_matrix_is_invalid(self):
+        bad = tuple(tuple(math.nan if i == j == 0 else v for j, v in enumerate(row))
+                    for i, row in enumerate(IDENTITY))
+        r = run(lm=landmarks(matrix=bad))
+        assert r.gate_record["pose_decomposition_valid"].satisfied is False
+
+    def test_tiny_eye_separation_names_the_right_gate(self):
+        """Stage 1 reported this as 'falls outside the image', which was false."""
+        r = run(lm=landmarks(left=(300.0, 300.0), right=(302.0, 300.0)))
+        assert r.status("patch_brightness_ratio:left") is Status.UNAVAILABLE
+        assert "raw_eye_separation_usable is False" in r.get("patch_brightness_ratio:left").reason
+
+    def test_eye_patch_off_the_bottom_edge_is_unavailable(self):
+        r = run(lm=landmarks(left=(200.0, 790.0), right=(400.0, 790.0), chin=(300.0, 799.0)))
+        assert r.status("patch_brightness_ratio:left") is Status.UNAVAILABLE
+        assert r.gate_record["eye_patch_in_frame:left"].satisfied is False
+
+    def test_eye_pixel_on_matte_background_fails_isolation(self):
+        r = run(m=matte(top=600))  # matte starts below the eyes
+        assert r.gate_record["face_component_isolated"].satisfied is False
+        for name in ("matte_top_row", "head_width_silhouette"):
+            assert r.status(name) is Status.UNAVAILABLE
+            assert "face_component_isolated" in r.get(name).reason
+
+    def test_chin_below_the_frame_is_unavailable(self):
+        r = run(lm=landmarks(chin=(300.0, 850.0)))
+        assert r.status("chin_landmark_y") is Status.UNAVAILABLE
+        assert blockers(r, "chin_landmark_y")[0] == {"landmark_in_frame:chin_152"}
+
+    def test_a_stray_pixel_does_not_inflate_head_width(self):
+        clean = run().value("head_width_silhouette")
+        noisy = run(m=matte(extra=[(150, 590)])).value("head_width_silhouette")
+        assert clean == noisy == 300.0
+
+    def test_a_head_clipped_at_the_side_has_no_width(self):
+        r = run(m=matte(left=0))
+        assert r.status("head_width_silhouette") is Status.UNAVAILABLE
+        assert blockers(r, "head_width_silhouette")[0] == {"matte_clear_of_left_edge"}
+        assert r.value("matte_top_row") == 100.0  # the crown is still fine
+
+
+class TestNewGates:
+    def test_yaw_beyond_limit_blocks_horizontal_projections_only(self):
+        r = run(lm=landmarks(matrix=yaw_matrix(35.0)))
+        for name in ("inter_eye_distance", "head_width_face_oval", "head_width_silhouette",
+                     "eye_mid_x"):
+            assert r.status(name) is Status.UNAVAILABLE, name
+            assert "yaw_within_measurement_limit" in blockers(r, name)[0]
+        assert r.status("eye_line_y") is Status.AVAILABLE  # vertical; not gated on yaw
+        assert r.value("pose_yaw") == pytest.approx(35.0, abs=0.01)
+
+    @pytest.mark.parametrize("deg", [12.0, -12.0])
+    def test_yaw_within_limit_on_both_signs_measures(self, deg):
+        r = run(lm=landmarks(matrix=yaw_matrix(deg)))
+        assert r.status("inter_eye_distance") is Status.AVAILABLE
+
+    def test_obscured_eyes_block_the_iris_measurements(self):
+        r = run(px=pixels(level=128, eye_level=40))  # eyes at 0.31 of cheek
+        for name in ("eye_line_y", "eye_mid_x", "inter_eye_distance"):
+            assert r.status(name) is Status.UNAVAILABLE, name
+            assert "eyes_unobscured_both" in blockers(r, name)[1]
+        assert r.gate_record["eye_unobscured:left"].satisfied is False
+        assert r.status("raw_eye_separation") is Status.AVAILABLE  # diagnostic survives
+
+    def test_one_obscured_eye_is_enough(self):
+        px = pixels()
+        px[240:360, 120:280] = 40  # left eye only
+        r = run(px=px)
+        assert r.gate_record["eye_unobscured:left"].satisfied is False
+        assert r.gate_record["eye_unobscured:right"].satisfied is True
+        assert r.status("inter_eye_distance") is Status.UNAVAILABLE
+
+    def test_closed_eyes_block_the_iris_measurements(self):
+        r = run(lm=landmarks(blendshapes={**NEUTRAL, "eyeBlinkLeft": 0.9, "eyeBlinkRight": 0.9}))
+        assert r.status("eye_line_y") is Status.UNAVAILABLE
+        assert "eyes_open_both" in blockers(r, "eye_line_y")[1]
+
+    def test_missing_blendshapes_leave_eyes_open_unknown_not_true(self):
+        """A detector that could not run is not a detector that passed."""
+        r = run(lm=landmarks(blendshapes=None))
+        assert r.gate_record["eye_open:left"].satisfied is None
+        assert r.status("eye_line_y") is Status.UNAVAILABLE
+
+    def test_missing_matrix_leaves_pose_gates_none(self):
+        r = run(lm=landmarks(matrix=None))
+        assert r.gate_record["pose_decomposition_valid"].satisfied is None
+        assert r.status("inter_eye_distance") is Status.UNAVAILABLE
+        assert "not evaluated" in r.get("inter_eye_distance").reason
+
+    def test_reason_lists_every_blocker_not_the_first(self):
+        r = run(lm=landmarks(matrix=None, blendshapes=None))
+        reason = r.get("inter_eye_distance").reason
+        assert "eyes_open_both" in reason and "yaw_within_measurement_limit" in reason
+
+
+def pitch_matrix(degrees: float):
+    t = math.radians(degrees)
+    c, s = math.cos(t), math.sin(t)
+    # Rotation about the horizontal (x) axis, as a 4x4 with unit scale.
+    return ((1.0, 0.0, 0.0, 0.0), (0.0, c, -s, 0.0), (0.0, s, c, 0.0), (0.0, 0.0, 0.0, 1.0))
+
+
+class TestPosedSetGates:
+    """The head-turn photographs from the 2026-09-04 posed set, via their measured angles.
+
+    Only the angles are checked in, not the photographs, so the matrix is reconstructed from
+    the angle. That tests the gate; it does not re-test the decomposition on real output."""
+
+    def test_8847_yaw_35_blocks_projected_widths(self):
+        r = run(lm=landmarks(matrix=yaw_matrix(35.3)))
+        for name in ("inter_eye_distance", "head_width_silhouette", "head_width_face_oval"):
+            assert r.status(name) is Status.UNAVAILABLE, name
+            assert "yaw_within_measurement_limit" in blockers(r, name)[0]
+
+    def test_8850_yaw_12_measures(self):
+        r = run(lm=landmarks(matrix=yaw_matrix(12.2)))
+        assert r.status("inter_eye_distance") is Status.AVAILABLE
+
+    def test_8849_pitch_minus_34_blocks_vertical_positions_not_ied(self):
+        r = run(lm=landmarks(matrix=pitch_matrix(-33.7)))
+        assert r.status("eye_line_y") is Status.UNAVAILABLE
+        assert r.status("chin_landmark_y") is Status.UNAVAILABLE
+        assert "pitch_within_measurement_limit" in blockers(r, "eye_line_y")[0]
+        assert r.status("inter_eye_distance") is Status.AVAILABLE  # not gated on pitch
+
+    def test_8848_pitch_24_is_inside_chinas_law_but_outside_our_operating_limit(self):
+        """The cost stated in the plan, asserted so it stays visible: China permits +/-25 deg
+        pitch, our measurement limit is 15, so this photo gets no eye line and hence no crop.
+        The remedy is the tunable in thresholds.py, not a silent widening."""
+        r = run(lm=landmarks(matrix=pitch_matrix(24.2)))
+        assert r.status("eye_line_y") is Status.UNAVAILABLE

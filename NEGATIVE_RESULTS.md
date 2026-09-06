@@ -1,7 +1,7 @@
 # Negative results
 
 Approaches that were tried and failed, or that look attractive and are not usable. Recorded so
-they are not retried. Cited from [README.md](README.md). Fresh as of 2026-09-04.
+they are not retried. Cited from [README.md](README.md). Fresh as of 2026-09-06.
 
 Each entry states what was observed, under what conditions, and what is *inference* rather than
 evidence.
@@ -151,3 +151,48 @@ Rebuilt to the digital rules at the spec's own reference size, face width landed
 mid-band.
 
 No tool caught this. A person did, three hours later, while reading the source document again.
+
+
+---
+
+## The Stage 1 eye-brightness ratio measured the nose bridge over the philtrum
+
+The Stage 1 "eye region / cheek" ratio was defined with an eye patch spanning **both** eyes -
+so its numerator included the bright bridge of the nose between them - and a "cheek" patch
+whose x-range ran *between* the eyes, so its denominator was the philtrum and nostrils. It
+separated eleven calibration photographs anyway, at a threshold of 1.12, which is how a wrong
+definition survives: the numbers looked fine.
+
+Two things were wrong with keeping it. A mirrored-sunglasses photograph without a cap read
+1.013 and escaped the 1.0 threshold by 0.013 - the earlier sunglasses photographs had a peaked
+cap supplying the shadow. And a denominator that is not skin is exactly where a skin-tone bias
+would hide unexamined.
+
+Redefined per eye in Stage 1b (eye patch around that iris; cheek patch lateral to and below
+it, on cheek proper), the same eleven photographs give:
+
+    obscured (cap shadow, mirrored shades x2)   0.30 - 0.44
+    not obscured (bare, shades on head, glasses) 0.63 - 0.85
+
+Threshold 0.53. The no-cap mirrored shades now read 0.39 / 0.43, deep in the obscured band.
+**The old threshold does not transfer to the new definition and must not be reused**: the
+same photographs read 1.5 under the old ratio and 0.8 under the new one.
+
+On this one subject the eye term does the discriminating (41-68 obscured, 87-129 not) and the
+cheek term stays 120-179 throughout. Whether the denominator holds across skin tones is the
+calibration stage's question, not answered here.
+
+---
+
+## Availability as an exception to enumerate cannot converge
+
+Stage 1 reported measurements as available unless a guard fired, and added guards as review
+found the holes. Six review passes found the same defect in six places, and an exhaustive
+inventory afterwards found three more still live: a hair tuft touching the top edge yielding
+`crown_y = 0` as measured; a gimbal-locked pose fabricating `roll = 0.0`; face-component
+isolation with five silent fallbacks where it quietly did not happen. Each guard added created
+a new bypass - one literally set a value unavailable and then fell through and overwrote it.
+
+Inverted in Stage 1b: a measurement is unavailable unless every gate it declares is
+affirmatively true, gates are evaluated once into a frozen record before anything is emitted,
+and the registry is the only construction path. See docs/STAGE1B-PRECONDITIONS.md.

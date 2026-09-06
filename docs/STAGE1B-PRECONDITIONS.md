@@ -101,19 +101,19 @@ withdrawn until the calibration stage — not tuned until eleven examples separa
 
 One PR, commits in this order, each pushed when green.
 
-- [ ] This document.
-- [ ] `Gate`, `GateRecord` (frozen, topological), `Precondition`, registry; `Measurement` constructor
+- [x] This document.
+- [x] `Gate`, `GateRecord` (frozen, topological), `Precondition`, registry; `Measurement` constructor
       invariant (identity tri-state, finite value); `MeasurementSet` private storage, `add()` once,
       `NOT_ATTEMPTED`; structured reasons; `--capabilities` from the registry with no weights.
       Tests: constructor, container, registry completeness both directions, capabilities output.
-- [ ] `measure()` as fit → gates → emit. Landmark and segmentation backends become fit-only;
+- [x] `measure()` as fit → gates → emit. Landmark and segmentation backends become fit-only;
       gate evaluators move to `gates.py`. The inventory fixes fall out of the gates rather than
       being patched: top-edge tuft, gimbal roll, mis-attributed reason, eye-patch bottom bound,
       five isolation fallbacks, landmark-in-frame, `--no-segmentation` absence. Tests: every
       inventory reproduction through `measure()` with stubbed raw outputs, each with a paired
       positive case; both `False` and `None` per gate; complete name set per run configuration.
-- [ ] Cheek patch redefinition; re-derive the eleven ratios; report; calibration tests updated to
-      whatever the truth is.
+- [x] Cheek patch redefinition; re-derived the eleven ratios: obscured 0.30-0.44, not obscured
+      0.63-0.85, threshold 0.53. Calibration tests updated to that.
 - [ ] Solver consumer refusal: `build_constraints` reports *cannot solve with available
       measurements* naming the rule; planner surfaces it; one CLI test.
 - [ ] Posed-set gate tests (8847 yaw, 8850, 8853 shades, 8864); reference regression (493, 1320,

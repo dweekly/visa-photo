@@ -107,6 +107,29 @@ def _render_plan(plan) -> None:
         print(f"  NOT APPLIED  {unapplied}")
     for note in plan.profile.notes:
         print(f"  note  {note}")
+def _capabilities(as_json: bool) -> int:
+    """The capability matrix, generated from the registry. Works with nothing installed."""
+    from .gates import GATE_SPECS
+    from .registry import capabilities
+
+    rows = capabilities()
+    if as_json:
+        json.dump({"measurements": rows,
+                   "gates": [{"id": g.id, "method": g.method, "prerequisites": list(g.prerequisites),
+                              "always_unknown": g.always_none} for g in GATE_SPECS]},
+                  sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return EXIT_OK
+    for row in rows:
+        marker = "  " if row["available_in_this_build"] else "x "
+        print(f"{marker}{row['measurement']:<30} {row['tier']:<10} {row['unit']:<9} {row['backend']}")
+        print(f"    {row['definition']}")
+        print(f"    requires: {', '.join(row['required_gates'])}")
+        if row["always_unknown_gates"]:
+            print(f"    NEVER AVAILABLE in this build: {', '.join(row['always_unknown_gates'])} "
+                  "cannot be evaluated")
+    print("\nx = unavailable on every image this build can process")
+    return EXIT_OK
 
 
 def _fetch_models() -> int:
@@ -167,6 +190,11 @@ def main(argv: list[str] | None = None) -> int:
         help="download the model weights, then exit. The only command that uses the network.",
     )
     parser.add_argument(
+        "--capabilities", action="store_true",
+        help="print what this build can measure, and under which conditions, then exit. "
+             "Needs no model weights.",
+    )
+    parser.add_argument(
         "--for", dest="jurisdiction", default=None, metavar="CODE",
         help="where the photo is going (e.g. CN, US, EU, NZ). Omit for generic advisories.",
     )
@@ -198,12 +226,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_USAGE
+    if args.capabilities:
+        return _capabilities(as_json=args.json)
 
     if args.fetch_models:
         return _fetch_models()
 
     if args.photo is None:
-        parser.error("a photo is required unless --fetch-models is given")
+        parser.error("a photo is required unless --fetch-models or --capabilities is given")
     if not args.photo.is_file():
         print(f"error: no such file: {args.photo}", file=sys.stderr)
         return EXIT_USAGE
@@ -213,12 +243,17 @@ def main(argv: list[str] | None = None) -> int:
             args.photo,
             model=args.model,
             jurisdiction=args.jurisdiction,
-            segmentation=not args.no_segmentation,
+            segmentation_enabled=not args.no_segmentation,
         )
     except MeasurementError as exc:
         print(f"cannot measure: {exc}", file=sys.stderr)
         return EXIT_CANNOT_MEASURE
 
+    face = measurements.gate_record["face_detected_one"]
+    if face.satisfied is not True:
+        print(f"cannot measure: {face.detail}", file=sys.stderr)
+        if not args.json:
+            return EXIT_CANNOT_MEASURE
     plan = make_plan(PROFILES[args.spec], measurements) if args.spec else None
 
     if args.json:

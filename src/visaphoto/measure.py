@@ -1,4 +1,13 @@
-"""Orchestration: source photo in, measurements plus a pre-flight report out."""
+"""Orchestration: source photo in, measurements plus a pre-flight report out.
+
+Three passes, in this order and never interleaved:
+
+1. **Fit** - run the landmarker and the segmenter; keep raw output only.
+2. **Gates** - evaluate every precondition into a frozen record.
+3. **Emit** - build every registry measurement by looking its gates up.
+
+Nothing is emitted before its gates are known. See docs/STAGE1B-PRECONDITIONS.md.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +15,8 @@ import os
 from pathlib import Path
 
 from . import preflight as preflight_mod
-from .backends import landmarks
-from .measurements import MeasurementSet
+from .backends import landmarks, segmentation
+from .evaluate import measure_all
 
 MODEL_FILENAME = "face_landmarker.task"
 MODEL_URL = (
@@ -17,7 +26,7 @@ MODEL_URL = (
 
 
 class MeasurementError(RuntimeError):
-    """The photo could not be measured at all. Distinct from a measurement being unavailable."""
+    """The photo could not be measured at all: unreadable image, or no model bundle."""
 
 
 def default_model_path() -> Path:
@@ -53,43 +62,34 @@ def measure_photo(
     photo: Path,
     model: Path | None = None,
     jurisdiction: str | None = None,
-    segmentation: bool = True,
+    segmentation_enabled: bool = True,
 ):
     """Measure `photo` and run pre-flight checks.
 
-    Raises MeasurementError when nothing meaningful can be produced - no face, several faces,
-    an unreadable image, or a missing model bundle. Individual measurements that cannot be
-    made are recorded as unavailable rather than raising.
+    Raises MeasurementError only when nothing can start: the image is unreadable or the model
+    bundle is absent. Everything else - no face, several faces, a failed model, an unusable
+    matte - is recorded in the gate record and reflected as unavailable measurements, so the
+    caller always receives the complete set and can say precisely what was and was not
+    established.
     """
+    import numpy as np
+
     model_path = model or default_model_path()
     if not model_path.is_file():
         raise MeasurementError(
-            f"landmark model not found at {model_path}. Download it from {MODEL_URL} "
+            f"landmark model not found at {model_path}. Run 'visa-photo --fetch-models' "
             "or set VISAPHOTO_MODEL."
         )
-
     try:
         image = load_rgb(photo)
     except Exception as exc:  # noqa: BLE001
         raise MeasurementError(f"could not read {photo}: {exc}") from exc
 
-    result = MeasurementSet(
-        source=str(photo), image_width=image.width, image_height=image.height
-    )
+    pixels = np.asarray(image)
+    lm = landmarks.fit(image, model_path)
+    matte = segmentation.fit(image) if segmentation_enabled else segmentation.NOT_ATTEMPTED
 
-    try:
-        blendshapes = landmarks.measure(image, model_path, result)
-    except landmarks.LandmarkError as exc:
-        raise MeasurementError(str(exc)) from exc
-
-    if segmentation:
-        _segmentation_measure(image, result)
-
-    report = preflight_mod.run(result, blendshapes, jurisdiction=jurisdiction)
+    result = measure_all(pixels, lm, matte, source=str(photo),
+                         segmentation_attempted=segmentation_enabled)
+    report = preflight_mod.run(result, dict(lm.blendshapes or {}), jurisdiction=jurisdiction)
     return result, report
-
-
-def _segmentation_measure(image, result: MeasurementSet) -> None:
-    from .backends import segmentation as seg
-
-    seg.measure(image, result)

@@ -127,25 +127,36 @@ def _expression_flags(scores: dict[str, float], result: MeasurementSet) -> dict[
             ),
         )
 
-    ratio = result.value("eye_brightness_ratio")
-    if ratio is not None:
+    # Per eye, and each eye must be assessable on its own: averaging would let one clear eye
+    # hide the other's failure. An eye with no ratio is not "fine"; it is unassessed, and the
+    # flag says which.
+    ratios = {s: result.value(f"patch_brightness_ratio:{s}") for s in ("left", "right")}
+    assessed = {s: r for s, r in ratios.items() if r is not None}
+    if assessed:
+        worst = min(assessed.values())
+        missing = [s for s, r in ratios.items() if r is None]
         flags["eyes_obscured"] = Flag(
-            name="eyes_obscured", raised=ratio < EYES_OBSCURED_RATIO, score=ratio,
+            name="eyes_obscured", raised=worst < EYES_OBSCURED_RATIO, score=worst,
             threshold=EYES_OBSCURED_RATIO,
             detail=(
-                f"the eye region is {ratio:.2f}x the brightness of the cheek (below "
-                f"{EYES_OBSCURED_RATIO} suggests tinted lenses or shadow across the eyes)"
+                "eye/cheek brightness "
+                + ", ".join(f"{s} {r:.2f}" for s, r in assessed.items())
+                + f" (below {EYES_OBSCURED_RATIO} suggests tinted lenses or shadow)"
+                + (f"; {', '.join(missing)} eye not assessable" if missing else "")
             ),
         )
 
-    glare = result.value("eye_specular_fraction")
-    if glare is not None:
+    specular = {s: result.value(f"eye_specular_fraction:{s}") for s in ("left", "right")}
+    assessed = {s: g for s, g in specular.items() if g is not None}
+    if assessed:
+        worst = max(assessed.values())
         flags["eye_glare"] = Flag(
-            name="eye_glare", raised=glare > EYE_GLARE_FRACTION, score=glare,
+            name="eye_glare", raised=worst > EYE_GLARE_FRACTION, score=worst,
             threshold=EYE_GLARE_FRACTION,
             detail=(
-                f"{glare * 100:.2f}% of the eye region is near-white (above "
-                f"{EYE_GLARE_FRACTION * 100:.1f}% suggests glare or a reflective lens)"
+                "near-white fraction of eye patch "
+                + ", ".join(f"{s} {g * 100:.2f}%" for s, g in assessed.items())
+                + f" (above {EYE_GLARE_FRACTION * 100:.1f}% suggests glare or a reflective lens)"
             ),
         )
 
