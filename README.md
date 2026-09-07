@@ -95,6 +95,8 @@ Exit codes are in `visa-photo --help`.
 | [docs/STAGE1B-PRECONDITIONS.md](docs/STAGE1B-PRECONDITIONS.md) | Gate graph, registry and sequence for precondition-driven measurement. Fresh as of 2026-09-06. |
 | [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md) | Working plan for rendering and encoding: what is in, what is out and why. Fresh as of 2026-09-06. |
 | [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md) | Working plan for validating the written file and the report contract. Fresh as of 2026-09-06. |
+| [docs/STAGE5-PROFILES.md](docs/STAGE5-PROFILES.md) | Working plan for the US, New Zealand and Schengen profiles, the Claude skill, and the 0.1.0 release. Fresh as of 2026-09-06. |
+| [docs/sources/](docs/sources/) | Verbatim quotations from the official pages each profile is built from, with URLs and retrieval dates. Fresh as of 2026-09-06. |
 | [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md) | Approaches that failed, so they aren't retried. Fresh as of 2026-09-04. |
 | [ROADMAP.md](ROADMAP.md) | Stack-ranked next steps. Fresh as of 2026-09-06. |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing changes per release. |
