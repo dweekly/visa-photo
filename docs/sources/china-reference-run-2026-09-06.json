@@ -1,0 +1,90 @@
+{
+  "purpose": "Behaviour receipt for the China digital profile on the reference photograph, taken before Stage 5 changed the schema. Numbers only; the photograph is not in the repository.",
+  "taken": "2026-09-06",
+  "baseline_commit": "eaac92b",
+  "source_sha256": "1013f346f1b60bf1356d8eb415e3f692a1daf478f1119af376a611969b7a1824",
+  "backends": {
+    "mediapipe": "0.10.35",
+    "rembg": "2.0.83",
+    "segmentation_model": "birefnet-general"
+  },
+  "plan": {
+    "size": {
+      "width": 354,
+      "height": 472
+    },
+    "scale": 0.18876611418034978,
+    "crop": {
+      "x": 285.917996424232,
+      "y": 281.09756097546546
+    },
+    "min_slack": 0.4999999999949947
+  },
+  "render": {
+    "colour_convert": {
+      "from": "Display P3",
+      "to": "sRGB",
+      "intent": "relative_colorimetric"
+    },
+    "crop_resize": {
+      "box": [
+        285.917996424232,
+        281.09756097546546,
+        2161.254581791368,
+        2781.54634146498
+      ],
+      "scale": 0.18876611418034978,
+      "output": {
+        "width": 354,
+        "height": 472
+      }
+    }
+  },
+  "encode": {
+    "quality": 98,
+    "bytes": 101482
+  },
+  "validation": {
+    "dimensions": {
+      "verdict": "pass",
+      "observed": null,
+      "predicted": null
+    },
+    "format": {
+      "verdict": "pass",
+      "observed": null,
+      "predicted": null
+    },
+    "colour": {
+      "verdict": "pass",
+      "observed": null,
+      "predicted": null
+    },
+    "size_bytes": {
+      "verdict": "pass",
+      "observed": 101482.0,
+      "predicted": null
+    },
+    "face_width": {
+      "verdict": "pass",
+      "observed": 205.0,
+      "predicted": 204.99999999985985
+    },
+    "crown_gap": {
+      "verdict": "pass",
+      "observed": 40.0,
+      "predicted": 39.99999999999989
+    },
+    "eye_line_from_bottom": {
+      "verdict": "pass",
+      "observed": 276.76702976226807,
+      "predicted": 275.9485896106773
+    },
+    "inter_eye_distance": {
+      "verdict": "pass",
+      "observed": 91.66509654161558,
+      "predicted": 93.3700831163354
+    }
+  },
+  "aggregate": "passes_implemented_checks"
+}
