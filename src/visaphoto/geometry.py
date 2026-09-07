@@ -93,10 +93,8 @@ class Constraint:
     lo_strict: bool = False
     """The source says "greater than": a value equal to `lo` violates the rule. The solver
     treats the interval as closed and maximizes slack; the validator is what fails a value on
-    the bound (validate.py). The solver does not refuse such a point itself: its optimum can
-    land on a bound while crops with slack exist, when a preference is unsatisfiable (see
-    ROADMAP, "Solver objective when a preference is unsatisfiable"), and a refusal there would
-    be false."""
+    the bound (validate.py). The solver does not refuse such a point itself: a feasible set of
+    exactly one point on a strict bound is solved and then failed, with the value shown."""
     hi_strict: bool = False
     hard: bool = False
     """Hard constraints must hold but earn no slack reward - source containment, for instance.
@@ -214,6 +212,24 @@ def _placement_interval(lo_bounds: list[_Bound], hi_bounds: list[_Bound], s: flo
     )
 
 
+def _lexicographic(
+    requirements: list[Constraint], preferences: list[Constraint], s: float, u: float, v: float,
+) -> tuple[float, float]:
+    """The slack objective: the requirements' minimum slack first, the preferences' second.
+
+    Compared as a tuple, so a preference decides only between crops whose requirement slack
+    ties. A preference the face cannot satisfy has negative slack at every crop; were it in the
+    same minimum as the requirements it would be that minimum everywhere, and the search would
+    be blind to the requirements' slack - which is how a crop with the eye line exactly on its
+    bound was once chosen over one with room. Each term is a min of functions linear in the
+    variable searched, so each is concave and ternary search over the tuple still converges:
+    the requirements' term is never cut where it is flat, and the preferences' term is what
+    decides there.
+    """
+    return (min((c.slack(s, u, v) for c in requirements), default=0.0),
+            min((c.slack(s, u, v) for c in preferences), default=0.0))
+
+
 def _best_placement(
     lo_bounds: list[_Bound], hi_bounds: list[_Bound], s: float,
     softs: list[Constraint], axis: str,
@@ -237,10 +253,12 @@ def _best_placement(
     relevant = [c for c in softs if getattr(c, axis) != 0.0]
     if not relevant:
         return (lo + hi) / 2.0
+    requirements = [c for c in relevant if not c.preference]
+    preferences = [c for c in relevant if c.preference]
 
-    def objective(x: float) -> float:
+    def objective(x: float) -> tuple[float, float]:
         u, v = (x, 0.0) if axis == "b" else (0.0, x)
-        return min(c.slack(s, u, v) for c in relevant)
+        return _lexicographic(requirements, preferences, s, u, v)
 
     for _ in range(_SEARCH_ITERATIONS):
         if hi - lo < 1e-12:
@@ -378,14 +396,16 @@ def solve(
         )
 
     softs = [c for c in constraints if not c.hard]
+    requirements = [c for c in softs if not c.preference]
+    preferences = [c for c in softs if c.preference]
 
     def placed(s: float) -> tuple[float, float]:
         return (_best_placement(v_lo, v_hi, s, softs, "b"),
                 _best_placement(h_lo, h_hi, s, softs, "c"))
 
-    def objective(s: float) -> float:
+    def objective(s: float) -> tuple[float, float]:
         u, v = placed(s)
-        return min((c.slack(s, u, v) for c in softs), default=0.0)
+        return _lexicographic(requirements, preferences, s, u, v)
 
     # Ternary search over scale. Sound here where sampling was not for feasibility: with the
     # feasible interval already decided exactly, the objective - a max over placement of a min
@@ -403,7 +423,6 @@ def solve(
     u, v = placed(s)
 
     slacks = {c.rule: c.slack(s, u, v) for c in constraints}
-    requirements = [c for c in softs if not c.preference]
     return Solution(
         scale=s, crop_x=v / s, crop_y=u / s,
         output_width=output_width, output_height=output_height,
