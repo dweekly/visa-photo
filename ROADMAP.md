@@ -45,8 +45,18 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   reference photo's crop is unchanged under it (its binding margin is the 14-px face-width
   half-band either way). Changes every reported slack; do it as its own PR with the
   normalization stated in `docs/STAGE2-SOLVER.md`.
-- **Stage 5 — seeded profiles and docs.** `cn_visa_digital`, `cn_visa_paper`, `us_visa_digital`,
-  `us_passport_print`, `schengen_icao_base`, `nz_nzeta`.
+- **Stage 5 — seeded profiles, the skill, a first release.** In progress on PR #8 (profiles)
+  with a second PR for the skill and `0.1.0`. `us_visa_digital` and `nz_nzeta` crop, write and
+  check; `us_passport_print` and `cn_visa_paper` plan only; `schengen_print` refuses to crop
+  with the reason (no EU-level composition rule exists; the ICAO rule the sources reach
+  governs the printed portrait inside the document) and advises. Plan and sources in
+  [docs/STAGE5-PROFILES.md](docs/STAGE5-PROFILES.md).
+- **After 0.1.0, from the Stage 5 review.** Member-state overlays (France 32–36 mm, Germany
+  70–80%, children 50–80% — all hair-exclusive or ambiguous about hair); US passport online
+  renewal as its own channel; the template graphics saved as assets; a redistributable
+  portrait wide enough to demonstrate the US square (the reference photograph cannot); the
+  anatomical crown, which today is still the matte's top behind a headwear gate — no headwear
+  does not make it a skull crown; cross-platform installation testing.
 
 ## Deferred from Stage 3, with the facts attached
 
@@ -60,10 +70,9 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   allows it and someone needs it, starting from those two failures.
 - **Print output.** A print profile needs physical size and DPI set from its millimetres, not a
   file at Pillow defaults.
-- **Joint plan-and-encoding search.** `make_plan` picks geometry by slack, blind to
-  compressibility; when no listed quality fits, another feasible crop or output size might.
-  China permits solving at its reference size only today, so this waits for a profile with
-  several sizes.
+- **Joint plan-and-encoding search within a size.** Stage 5 tries a profile's sizes in order
+  and advances when no listed quality fits; searching other crops *within* a size, and
+  validation-driven recropping, remain deferred.
 - **Operation permission as a planning prerequisite.** `Plan.feasible` establishes geometry, not
   that the profile permits crop, resize and encode. Every seeded profile allows all three; before
   one that does not, permission joins the plan or becomes an explicit execution gate.

@@ -6,6 +6,27 @@ User-facing changes, newest first. Cited from [README.md](README.md).
 
 Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 
+### Added (unreleased, Stage 5a)
+- Three destinations join China, each built from sentences on official pages fetched on
+  2026-09-06 and kept verbatim under `docs/sources/`. `us_visa_digital` (square 600-1200 px,
+  head 50-69% and eye line 56-69% of image height, JPEG at most 240 kB, 24-bit sRGB, 20:1
+  compression cap) and `nz_nzeta` (3:4 from 900x1200 to 2250x3000, JPG, 512 KB-3.14 MB or
+  500 KB-3 MB depending on which INZ page, head 70-80% under a stated reading) crop, write and
+  check end to end. `us_passport_print` plans only. `schengen_print` refuses to crop - no
+  EU-level composition rule exists, and the ICAO rule the sources reach governs the printed
+  portrait inside the document - and advises on what the EU sheet does state.
+- Where a rule's words define nothing ("face covers 70-80% of the image"), the reading applied
+  is on the rule and printed in the plan and every validation criterion; where the words imply
+  arithmetic ("205 +/- 14"), the derivation is. Every rule carries its source and retrieval
+  date. The plan report lists every rule with these.
+- Sizes are tried in the profile's order and a size whose crop cannot be encoded within the
+  rules yields to the next; the encoder searches every integer quality from 98 to 70.
+- Colour is checked only where the source requires something, from what the file carries; a
+  compression cap is enforced and reported as the byte floor it is; permitted dimensions can be
+  a range with an exact aspect.
+- `--spec` selects the channel's advisories: the US visa page requires a neutral expression
+  and the passport page permits a smile, and the tool warns accordingly.
+
 ### Changed (unreleased, solver)
 - A composition preference (keeping the eyes centred) now decides only between crops that
   satisfy the destination's rules equally well. A face whose eyes sit far to one side, where

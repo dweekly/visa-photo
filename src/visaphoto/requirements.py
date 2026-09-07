@@ -29,6 +29,8 @@ US_VISA_PHOTOS = "https://travel.state.gov/content/travel/en/us-visas/visa-infor
 US_PASSPORT_PHOTOS = "https://travel.state.gov/en/passports/apply/help/photos.html"
 EU_GUIDANCE = "https://home-affairs.ec.europa.eu/document/download/5bb16566-c8c2-4afb-b038-530f488cb72a_en"
 NZ_PHOTOS = "https://www.immigration.govt.nz/process-to-apply/applying-for-a-visa/applying-online/uploading-documents-and-photos/visa-and-nzeta-photos/"
+NZ_PHOTOGRAPHER = "https://www.immigration.govt.nz/assets/inz/documents/apply-for-a-visa/Taking-acceptable-visa-photos.pdf"
+US_VISA_FAQ = "https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos/frequently-asked-questions.html"
 
 
 class Check(enum.Enum):
@@ -68,10 +70,20 @@ class Requirement:
     "neutral with eyes open, mouth closed", and substring matching on "expression" silently
     dropped the eyes-open half, so a photo with closed eyes passed."""
 
+    permits: tuple[str, ...] = ()
+    """Signals this requirement explicitly allows ("You can smile"). A permitted signal is
+    covered - the generic fallback does not warn on it - and is never assessed."""
+
+    profiles: tuple[str, ...] | None = None
+    """Profiles this requirement applies to, when a jurisdiction's channels differ (the US
+    visa page requires a neutral expression; the passport page permits a smile). None means
+    every profile of the jurisdiction; a restricted requirement is absent under a bare --for."""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "jurisdictions": list(self.jurisdictions),
+            "profiles": list(self.profiles) if self.profiles else None,
             "quote": self.quote,
             "source": self.source,
             "check": self.check.value,
@@ -145,7 +157,9 @@ REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         key="glasses_us_visa",
         jurisdictions=("US",),
-        quote="Eyeglasses are no longer allowed in new visa photos",
+        profiles=("us_visa_digital",),
+        quote="Eyeglasses are no longer allowed in new visa photos, except in rare circumstances "
+              "when eyeglasses cannot be removed for medical reasons",
         source=US_VISA_PHOTOS,
         check=Check.NOT_ASSESSABLE,
         note=(
@@ -217,12 +231,14 @@ REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         key="background_nz",
         jurisdictions=("NZ",),
-        quote="plain, light-coloured (not white)",
+        quote="The background of your photo must: be neutral and plain, and only show you and no "
+              "other people or objects.",
         source=NZ_PHOTOS,
         check=Check.NOT_ASSESSABLE,
         note=(
-            "NZ discourages white, where CN and US require white or off-white. There is no "
-            "single background rule across jurisdictions."
+            "The upload-error page suggests 'light grey'; the photographer sheet requires 'plain, "
+            "light-coloured (not white)'. CN and US require white or off-white. There is no "
+            "single background rule across jurisdictions, and no check in this build."
         ),
     ),
     Requirement(
@@ -254,10 +270,156 @@ REQUIREMENTS: tuple[Requirement, ...] = (
     Requirement(
         key="no_digital_alteration_us_passport",
         jurisdictions=("US",),
-        quote="You may not digitally alter your photo",
+        profiles=("us_passport_print",),
+        quote="Submit the original, unchanged photo. Do not change your photo using computer "
+              "software, phone apps or filters, or artificial intelligence.",
         source=US_PASSPORT_PHOTOS,
         check=Check.OPERATION_POLICY,
         note="Applies to the US passport channel.",
+    ),
+    Requirement(
+        key="no_digital_alteration_us_visa",
+        jurisdictions=("US",),
+        profiles=("us_visa_digital",),
+        quote="Photos must not be digitally enhanced or altered to change your appearance in "
+              "any way.",
+        source=US_VISA_PHOTOS,
+        check=Check.OPERATION_POLICY,
+        note="Applies to the US visa channel.",
+    ),
+    Requirement(
+        key="expression_neutral_us_visa",
+        jurisdictions=("US",),
+        profiles=("us_visa_digital",),
+        quote="With a neutral facial expression and both eyes open",
+        source=US_VISA_PHOTOS,
+        check=Check.ADVISORY_SIGNAL,
+        note="Assessed with MediaPipe blendshapes against uncalibrated thresholds; see thresholds.py.",
+        signals=("smile", "eyes_closed"),
+    ),
+    Requirement(
+        key="expression_us_passport",
+        jurisdictions=("US",),
+        profiles=("us_passport_print",),
+        quote="Avoid exaggerated facial expressions. You can smile in your photo. Just make sure "
+              "your eyes are open and your mouth is closed.",
+        source=US_PASSPORT_PHOTOS,
+        check=Check.ADVISORY_SIGNAL,
+        note="A smile is permitted, so the smile signal is covered without warning; 'exaggerated' "
+             "is not assessed.",
+        signals=("mouth_open", "eyes_closed"),
+        permits=("smile",),
+    ),
+    Requirement(
+        key="background_us_visa",
+        jurisdictions=("US",),
+        profiles=("us_visa_digital",),
+        quote="Taken in front of a plain white or off-white background",
+        source=US_VISA_PHOTOS,
+        check=Check.NOT_ASSESSABLE,
+        note="No background check in this build; see ROADMAP.md.",
+    ),
+    Requirement(
+        key="background_us_passport",
+        jurisdictions=("US",),
+        profiles=("us_passport_print",),
+        quote="Background must be white or off-white, free of shadows, and plain without "
+              "texture, objects, or lines.",
+        source=US_PASSPORT_PHOTOS,
+        check=Check.NOT_ASSESSABLE,
+        note="No background check in this build; see ROADMAP.md.",
+    ),
+    Requirement(
+        key="glasses_us_passport",
+        jurisdictions=("US",),
+        profiles=("us_passport_print",),
+        quote="Take off any eyeglasses, sunglasses, or tinted glasses. Do not rest them on your "
+              "head for the photo.",
+        source=US_PASSPORT_PHOTOS,
+        check=Check.NOT_ASSESSABLE,
+        note="Frames are not detected in this build.",
+    ),
+    Requirement(
+        key="head_covering_us_visa",
+        jurisdictions=("US",),
+        profiles=("us_visa_digital",),
+        quote="Do not wear a hat or head covering that obscures the hair or hairline, unless "
+              "worn daily for a religious purpose. Your full face must be visible, and the head "
+              "covering must not cast any shadows on your face.",
+        source=US_VISA_PHOTOS,
+        check=Check.USER_ATTESTATION,
+    ),
+    Requirement(
+        key="recency_us_visa",
+        jurisdictions=("US",),
+        profiles=("us_visa_digital",),
+        quote="Taken within the last 6 months to reflect your current appearance",
+        source=US_VISA_PHOTOS,
+        check=Check.USER_ATTESTATION,
+    ),
+    Requirement(
+        key="recency_us_passport",
+        jurisdictions=("US",),
+        profiles=("us_passport_print",),
+        quote="Your passport photo needs to have been taken within the last 6 months.",
+        source=US_PASSPORT_PHOTOS,
+        check=Check.USER_ATTESTATION,
+    ),
+    Requirement(
+        key="expression_nz",
+        jurisdictions=("NZ",),
+        quote="you are looking straight at the camera with a neutral expression and your mouth "
+              "is closed",
+        source=NZ_PHOTOS,
+        check=Check.ADVISORY_SIGNAL,
+        note="Assessed with MediaPipe blendshapes against uncalibrated thresholds; see thresholds.py.",
+        signals=("smile", "mouth_open"),
+    ),
+    Requirement(
+        key="eyes_open_nz",
+        jurisdictions=("NZ",),
+        quote="Your eyes must be open.",
+        source=NZ_PHOTOS,
+        check=Check.ADVISORY_SIGNAL,
+        signals=("eyes_closed",),
+    ),
+    Requirement(
+        key="recency_nz",
+        jurisdictions=("NZ",),
+        quote="have been taken within the last 6 months",
+        source=NZ_PHOTOS,
+        check=Check.USER_ATTESTATION,
+    ),
+    Requirement(
+        key="not_a_photo_of_a_photo_nz",
+        jurisdictions=("NZ",),
+        quote="not be a photo of a photo.",
+        source=NZ_PHOTOS,
+        check=Check.USER_ATTESTATION,
+    ),
+    Requirement(
+        key="recency_eu",
+        jurisdictions=("EU",),
+        quote="no more than 6-months old",
+        source=EU_GUIDANCE,
+        check=Check.USER_ATTESTATION,
+    ),
+    Requirement(
+        key="background_eu",
+        jurisdictions=("EU",),
+        quote="be taken with a plain light-coloured background",
+        source=EU_GUIDANCE,
+        check=Check.NOT_ASSESSABLE,
+        note="No background check in this build; see ROADMAP.md.",
+    ),
+    Requirement(
+        key="head_covering_eu",
+        jurisdictions=("EU",),
+        quote="are not permitted except for religious reasons, but your facial features from "
+              "bottom of chin to top of forehead and both edges of your face must be clearly "
+              "shown.",
+        source=EU_GUIDANCE,
+        check=Check.USER_ATTESTATION,
     ),
 )
 
@@ -339,11 +501,15 @@ GENERIC_ADVISORIES: tuple[Requirement, ...] = (
 )
 
 
-def for_jurisdiction(code: str) -> tuple[Requirement, ...]:
-    """Requirements asserted by one jurisdiction. Empty is a meaningful answer: it means the
-    reviewed sources for that jurisdiction state no subject requirement we transcribed, NOT
-    that the jurisdiction has none."""
-    return tuple(r for r in REQUIREMENTS if code.upper() in r.jurisdictions)
+def for_jurisdiction(code: str, profile: str | None = None) -> tuple[Requirement, ...]:
+    """Requirements asserted by one jurisdiction, and by one of its profiles when named. Empty
+    is a meaningful answer: it means the reviewed sources for that jurisdiction state no
+    subject requirement we transcribed, NOT that the jurisdiction has none."""
+    return tuple(
+        r for r in REQUIREMENTS
+        if code.upper() in r.jurisdictions
+        and (r.profiles is None or (profile is not None and profile in r.profiles))
+    )
 
 
 def jurisdictions() -> tuple[str, ...]:

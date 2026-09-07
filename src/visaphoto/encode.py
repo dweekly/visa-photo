@@ -20,10 +20,12 @@ from PIL import Image
 
 from .profiles import Encoding
 
-# Highest first. 70 is the floor of the search - a tool choice: below it a 354-px-wide face is
-# visibly degraded on inspection, so the search stops there rather than squeezing a file into a
-# band at a quality nobody should submit. It is not a published threshold.
-JPEG_QUALITIES: tuple[int, ...] = (98, 96, 94, 92, 90, 88, 85, 82, 80, 75, 70)
+# Highest first, every integer step: a destination's band can be narrow (the US cap of 20:1 at
+# 1200x1200 leaves 216,000-240,000 bytes, 10% wide) and coarser steps can jump over it. 70 is
+# the floor of the search - a tool choice: below it a 354-px-wide face is visibly degraded on
+# inspection, so the search stops there rather than squeezing a file into a band at a quality
+# nobody should submit. It is not a published threshold.
+JPEG_QUALITIES: tuple[int, ...] = tuple(range(98, 69, -1))
 
 # Pillow's JPEG subsampling codes.
 _SUBSAMPLING = {"4:4:4": 0, "4:2:2": 1, "4:2:0": 2}
@@ -50,10 +52,10 @@ class EncodeResult:
                 "detail": self.detail}
 
 
-def _within(size: int, encoding: Encoding) -> bool:
-    if encoding.min_bytes is not None and size < encoding.min_bytes:
+def _within(size: int, floor: int | None, ceiling: int | None) -> bool:
+    if floor is not None and size < floor:
         return False
-    if encoding.max_bytes is not None and size > encoding.max_bytes:
+    if ceiling is not None and size > ceiling:
         return False
     return True
 
@@ -94,6 +96,10 @@ class _Staged:
 
 
 def _search(image, encoding: Encoding, staged: _Staged, trace: list[dict[str, Any]]) -> EncodeResult:
+    # The floor at this size: the readings' intersection, raised by a compression-ratio cap
+    # where the source states one (a cap on the ratio is a floor on bytes).
+    floor = encoding.min_bytes_for(*image.size)
+    ceiling = encoding.max_bytes
     for quality in JPEG_QUALITIES:
         # Write, then measure the file on disk: the number that matters is the one the
         # applicant's upload form will see, after every byte the encoder emits. Every listed
@@ -101,13 +107,15 @@ def _search(image, encoding: Encoding, staged: _Staged, trace: list[dict[str, An
         image.save(staged.path, format="JPEG", quality=quality,
                    subsampling=_SUBSAMPLING[encoding.subsampling])
         size = staged.path.stat().st_size
-        fits = _within(size, encoding)
+        fits = _within(size, floor, ceiling)
         trace.append({"quality": quality, "bytes": size, "fits": fits})
         if fits:
             staged.commit()
             return EncodeResult("done", staged.out, quality, size, trace,
                                 f"quality {quality}, {size} bytes")
-    band = f"{encoding.min_bytes or 0}-{encoding.max_bytes or 'inf'} bytes"
+    band = f"{floor or 0}-{ceiling or 'inf'} bytes at {image.size[0]}x{image.size[1]}"
+    if encoding.max_compression_ratio is not None and floor is not None and floor > (encoding.min_bytes or 0):
+        band += f" (floor from the {encoding.max_compression_ratio:g}:1 compression cap)"
     return EncodeResult("no_encoding_satisfies", None, None, None, trace,
                         f"no listed JPEG quality produced a file within {band}; nothing written")
 

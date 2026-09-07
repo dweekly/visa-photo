@@ -107,6 +107,21 @@ def _render_plan(plan) -> None:
         else:
             print(f"  {label:<10} ok        slack {attempt.outcome.min_slack:+.3f}")
 
+    rules = plan.applied_rules()
+    print("  rules:" + ("" if rules else " none - the reviewed sources state no computable rule"))
+    for r in rules:
+        lo = "-inf" if r["lo"] is None else f"{r['lo']:g}"
+        hi = "inf" if r["hi"] is None else f"{r['hi']:g}"
+        band = f"{'(' if r['lo_strict'] else '['}{lo}, {hi}{')' if r['hi_strict'] else ']'} {r['unit']}"
+        status = "applied" if r["applied"] else f"NOT APPLIED - {r['reason']}"
+        print(f"    {r['key']:<22} {band:<28} {status}")
+        if r["interpretation"]:
+            print(f"    {'':<22} reading: {r['interpretation']}")
+        if r["derivation"]:
+            print(f"    {'':<22} derived: {r['derivation']}")
+    for note in plan.profile.notes:
+        print(f"  note  {note}")
+
     chosen = plan.chosen
     if chosen is None:
         print("\n  No output size satisfies this profile for this photograph.")
@@ -123,8 +138,6 @@ def _render_plan(plan) -> None:
             print(f"    {rule:<24} {value:+.3f}")
     for unapplied in chosen.unapplied:
         print(f"  NOT APPLIED  {unapplied}")
-    for note in plan.profile.notes:
-        print(f"  note  {note}")
 def _capabilities(as_json: bool) -> int:
     """The capability matrix, generated from the registry. Works with nothing installed."""
     from .gates import GATE_SPECS
@@ -243,7 +256,13 @@ def main(argv: list[str] | None = None) -> int:
         for key, profile in sorted(PROFILES.items()):
             sizes = ", ".join(f"{s.width}x{s.height}" for s in profile.sizes)
             print(f"{key:<20} {profile.destination} - {profile.channel}")
-            print(f"{'':<20} sizes: {sizes}")
+            print(f"{'':<20} sizes tried, in order: {sizes}")
+            if profile.dimensions is not None:
+                d = profile.dimensions
+                print(f"{'':<20} permitted: {d.aspect[0]}:{d.aspect[1]}, "
+                      f"{d.min.width}x{d.min.height} to {d.max.width}x{d.max.height}")
+            if profile.encoding is None:
+                print(f"{'':<20} print profile: plans only (no --out, no --validate)")
         return EXIT_OK
 
     if args.spec is not None and args.spec not in PROFILES:
@@ -277,6 +296,10 @@ def main(argv: list[str] | None = None) -> int:
     if (args.validate or args.out is not None) and profile is not None and profile.encoding is None:
         print(f"error: {args.spec} states no digital encoding rules; --out and --validate are "
               "not supported for print profiles yet", file=sys.stderr)
+        return EXIT_USAGE
+    if args.out is not None and profile is not None and profile.operations.get("encode") == "prohibited":
+        print(f"error: {args.spec} prohibits encoding: "
+              + profile.operations_quotes.get("encode", "no sentence recorded"), file=sys.stderr)
         return EXIT_USAGE
     # A profile names the jurisdiction whose advisories apply beside its rules. --for may
     # agree; it may not point somewhere else.
@@ -330,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             jurisdiction=jurisdiction,
             segmentation_enabled=not args.no_segmentation,
             source=source,
+            profile=args.spec,
         )
     except MeasurementError as exc:
         report["error"] = f"cannot measure: {exc}"
@@ -355,23 +379,37 @@ def main(argv: list[str] | None = None) -> int:
     elif profile is not None:
         plan = make_plan(profile, measurements)
 
+    earlier_sizes: list[dict[str, Any]] = []
+    written_attempt = None
     if args.out is not None and plan is not None and plan.feasible and not cannot_measure:
-        rendered = render(source, plan)
-        if rendered.rendered and out_unusable:
-            encoded = EncodeResult("write_failed", None, None, None, [], out_unusable)
-        elif rendered.rendered:
+        # Sizes in the profile's order; a size whose crop cannot be encoded within the rules
+        # yields to the next. Nothing at --out is touched until one succeeds.
+        for attempt in plan.feasible_attempts:
+            rendered = render(source, plan, profile, attempt)
+            if not rendered.rendered:
+                break
+            if out_unusable:
+                encoded = EncodeResult("write_failed", None, None, None, [], out_unusable)
+                break
             encoded = encode(rendered.image, profile.encoding, args.out)
+            if encoded.done or encoded.status == "write_failed":
+                break
+            earlier_sizes.append({"size": {"width": attempt.size.width, "height": attempt.size.height},
+                                  "status": encoded.status, "detail": encoded.detail,
+                                  "trace": encoded.trace})
         if encoded is not None and encoded.done:
+            written_attempt = attempt
             # Validate the written file from the written file: decoded and measured afresh,
             # with the plan's prediction beside each observation.
             try:
                 out_source = load_source(args.out)
                 out_measurements, out_preflight = measure_photo(
                     args.out, model=args.model, jurisdiction=jurisdiction,
-                    segmentation_enabled=not args.no_segmentation, source=out_source)
+                    segmentation_enabled=not args.no_segmentation, source=out_source,
+                    profile=args.spec)
                 facts = file_facts(args.out, out_source.native.size)
                 validation = validate(profile, facts, out_measurements, out_preflight,
-                                      predict(profile, plan, measurements))
+                                      predict(profile, plan, measurements, attempt))
                 # The output's own face gate, as the input's is checked above: a written file
                 # in which no face was found is an unmeasured output, not an incomplete pass.
                 out_face = out_measurements.gate_record["face_detected_one"]
@@ -382,7 +420,10 @@ def main(argv: list[str] | None = None) -> int:
 
     report["plan"] = plan.to_dict() if plan else None
     report["render"] = rendered.to_dict() if rendered else None
-    report["encode"] = encoded.to_dict() if encoded else None
+    report["encode"] = ({**encoded.to_dict(), "earlier_sizes": earlier_sizes,
+                         "size": ({"width": written_attempt.size.width, "height": written_attempt.size.height}
+                                  if written_attempt else None)}
+                        if encoded else None)
     if validation is not None:
         report["validation"] = validation.to_dict()
     if validation_error is not None:
@@ -396,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         if plan:
             _render_plan(plan)
         if rendered:
-            _render_history(rendered, encoded)
+            _render_history(rendered, encoded, earlier_sizes)
         if validation is not None:
             _render_validation(validation)
         if validation_error is not None:
@@ -434,8 +475,10 @@ def _render_validation(v) -> None:
         print("  advisory warnings on this file: " + "; ".join(v.warnings))
 
 
-def _render_history(rendered, encoded) -> None:
+def _render_history(rendered, encoded, earlier_sizes=()) -> None:
     print("\noperations")
+    for e in earlier_sizes:
+        print(f"  {e['size']['width']}x{e['size']['height']:<10} {e['status']}: {e['detail']}")
     for h in rendered.history:
         print(f"  {h.name:<16} {h.status:<8} {h.detail}")
         if h.name == "crop_resize" and h.status == "done":

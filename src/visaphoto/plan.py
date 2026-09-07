@@ -46,6 +46,28 @@ class Plan:
     def feasible(self) -> bool:
         return self.chosen is not None
 
+    @property
+    def feasible_attempts(self) -> list[SizeAttempt]:
+        """Every solvable size, in the profile's order: the first is `chosen`, the rest are
+        what rendering falls back to when the first cannot be encoded within the rules."""
+        return [a for a in self.attempts if isinstance(a.outcome, Solution)]
+
+    def applied_rules(self) -> list[dict[str, Any]]:
+        """Every rule of the profile with its provenance and reading, and whether the plan
+        applied it - so a report shows the words behind each bound and the reading chosen
+        where the words define nothing."""
+        attempt = self.chosen or (self.attempts[0] if self.attempts else None)
+        out = []
+        for rule in self.profile.rules:
+            reason = next((u for u in (attempt.unapplied if attempt else []) if u.startswith(rule.key + ":")), None)
+            source, retrieved = self.profile.provenance(rule)
+            entry = rule.to_dict()
+            entry.update({"source": source, "retrieved": retrieved,
+                          "applied": attempt is not None and attempt.outcome is not None and reason is None,
+                          "reason": reason if reason else (attempt.skipped if attempt and attempt.skipped else None)})
+            out.append(entry)
+        return out
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "profile": self.profile.key,
@@ -54,15 +76,23 @@ class Plan:
             "feasible": self.feasible,
             "chosen": self.chosen.to_dict() if self.chosen else None,
             "attempts": [a.to_dict() for a in self.attempts],
+            "applied_rules": self.applied_rules(),
             "notes": list(self.profile.notes),
         }
 
 
 def make_plan(profile: Profile, measurements: MeasurementSet) -> Plan:
-    """Try every permitted output size; keep the feasible one with the most slack."""
+    """Try every permitted output size in the profile's order; the first feasible is chosen.
+
+    The order is the profile's statement of preference - the size a destination's own tool
+    produces first, or the largest first where a byte floor is easier to reach with more
+    pixels - and rendering falls back along it when a size cannot be encoded."""
     attempts: list[SizeAttempt] = []
 
     for size in profile.sizes:
+        if profile.composition_unresolved:
+            attempts.append(SizeAttempt(size=size, outcome=None, skipped=profile.composition_unresolved))
+            continue
         try:
             constraints, unapplied = build_constraints(profile, size, measurements)
         except ProfileError as exc:
@@ -80,18 +110,5 @@ def make_plan(profile: Profile, measurements: MeasurementSet) -> Plan:
         outcome = solve(constraints, size.width, size.height)
         attempts.append(SizeAttempt(size=size, outcome=outcome, unapplied=unapplied))
 
-    feasible = [
-        a for a in attempts if isinstance(a.outcome, Solution)
-    ]
-    # Most slack wins; ties break on the larger output, then on width, so the result is
-    # deterministic rather than dependent on dict or list ordering.
-    chosen = max(
-        feasible,
-        key=lambda a: (
-            a.outcome.min_slack,  # type: ignore[union-attr]
-            a.size.width * a.size.height,
-            a.size.width,
-        ),
-        default=None,
-    )
-    return Plan(profile=profile, chosen=chosen, attempts=attempts)
+    feasible = [a for a in attempts if isinstance(a.outcome, Solution)]
+    return Plan(profile=profile, chosen=feasible[0] if feasible else None, attempts=attempts)

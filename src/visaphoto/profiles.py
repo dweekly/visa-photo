@@ -40,13 +40,27 @@ class Rule:
     """True when the source says "greater than", not "at least": a value equal to `lo` fails."""
     hi_strict: bool = False
     unit: str = "px"
+    """`px` (stated at the reference size), `mm` (a print), or `fraction_height` (a fraction
+    of the output image's height, as the US states its digital rules)."""
     note: str = ""
+    interpretation: str = ""
+    """The reading applied when the quote is not a computable definition ("face covers 70-80%
+    of the image"). Printed wherever the rule appears; empty when the quote defines the
+    quantity itself."""
+    derivation: str = ""
+    """Arithmetic the quote implies but does not state as the bound used ("205 +/- 14 ->
+    191-219"). Not an interpretation: no reading was chosen, only a sum done."""
+    source: str = ""
+    """URL of the page the quote is from; inherits the profile's when empty."""
+    retrieved: str = ""
+    """Retrieval date of that page; inherits the profile's when empty."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key, "quote": self.quote, "measurement": self.measurement,
             "lo": self.lo, "hi": self.hi, "lo_strict": self.lo_strict, "hi_strict": self.hi_strict,
-            "unit": self.unit, "note": self.note,
+            "unit": self.unit, "note": self.note, "interpretation": self.interpretation,
+            "derivation": self.derivation, "source": self.source, "retrieved": self.retrieved,
         }
 
 
@@ -58,6 +72,33 @@ class OutputSize:
     @property
     def aspect(self) -> float:
         return self.width / self.height
+
+
+@dataclass(frozen=True)
+class DimensionRange:
+    """Permitted dimensions stated as a range with a fixed aspect, as the US ("600 x 600
+    minimum, 1200 x 1200 maximum, square") and New Zealand ("between 900 x 1200 and 2250 x 3000
+    pixels", 3:4) state them. `aspect` is exact and integer: (1, 1), (3, 4)."""
+
+    min: OutputSize
+    max: OutputSize
+    aspect: tuple[int, int]
+    quote: str = ""
+    source: str = ""
+
+    def permits(self, width: int, height: int) -> tuple[bool, str]:
+        aw, ah = self.aspect
+        if width * ah != height * aw:
+            return False, f"{width}x{height} is not {aw}:{ah}"
+        if not (self.min.width <= width <= self.max.width and self.min.height <= height <= self.max.height):
+            return False, (f"{width}x{height} is outside {self.min.width}x{self.min.height} to "
+                           f"{self.max.width}x{self.max.height}")
+        return True, f"{width}x{height} is {aw}:{ah} and within the permitted range"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"min": {"width": self.min.width, "height": self.min.height},
+                "max": {"width": self.max.width, "height": self.max.height},
+                "aspect": list(self.aspect), "quote": self.quote, "source": self.source}
 
 
 @dataclass(frozen=True)
@@ -90,11 +131,31 @@ class Encoding:
     format: str
     """`jpeg` is the only format this build writes."""
     colour: str
-    """`srgb_24bit`: 8 bits per channel RGB, sRGB primaries, written without a profile."""
+    """What the encoder writes: `srgb_24bit`, 8 bits per channel RGB, sRGB primaries, no
+    embedded profile. The encoder's choice, fixed, and not by itself a requirement."""
     quote: str
     interpretation: str
     size_readings: tuple[SizeReading, ...] = ()
     subsampling: str = "4:4:4"
+    colour_required: str | None = None
+    """What the source requires of the file, if it says: `rgb_24bit` ("RGB 24bit true colour")
+    or `srgb_24bit` ("24 bits per pixel in sRGB color space"). None when the source states no
+    colour requirement; the validator then checks nothing about colour."""
+    max_compression_ratio: float | None = None
+    """A cap on compression ratio is a floor on bytes. Read as uncompressed bytes = width x
+    height x 3 (8-bit RGB) over the written file's bytes, headers included; the reading is in
+    `compression_reading`."""
+    compression_reading: str = ""
+    source: str = ""
+
+    def min_bytes_for(self, width: int, height: int) -> int | None:
+        """The floor at one output size: the readings' intersection and the compression floor,
+        whichever is higher."""
+        floors = [self.min_bytes]
+        if self.max_compression_ratio is not None:
+            floors.append(int(-(-width * height * 3 // self.max_compression_ratio)))  # ceil
+        floors = [f for f in floors if f is not None]
+        return max(floors) if floors else None
 
     @property
     def min_bytes(self) -> int | None:
@@ -112,7 +173,9 @@ class Encoding:
             "size_readings": [r.to_dict() for r in self.size_readings],
             "min_bytes": self.min_bytes, "max_bytes": self.max_bytes,
             "subsampling": self.subsampling, "quote": self.quote,
-            "interpretation": self.interpretation,
+            "interpretation": self.interpretation, "colour_required": self.colour_required,
+            "max_compression_ratio": self.max_compression_ratio,
+            "compression_reading": self.compression_reading, "source": self.source,
         }
 
 
@@ -140,9 +203,21 @@ class Profile:
     literally and only at sizes we can justify - see `sizes_for_pixel_rules`."""
 
     operations: dict[str, str] = field(default_factory=dict)
+    operations_quotes: dict[str, str] = field(default_factory=dict)
+    """The sentence each operation policy rests on, per channel, keyed by operation."""
     encoding: Encoding | None = None
     """The channel's file rules for a digital upload; None for a print profile."""
+    dimensions: DimensionRange | None = None
+    """Permitted dimensions as a range, when the source states one; None means exactly the
+    listed `sizes`. `sizes` stays the ordered list the solver tries."""
+    composition_unresolved: str = ""
+    """When the reviewed sources state no computable composition rule, the reason. The plan
+    skips every size with it: no crop is solved from rules nobody wrote."""
     notes: tuple[str, ...] = ()
+
+    def provenance(self, rule: Rule) -> tuple[str, str]:
+        """(source URL, retrieval date) for a rule, inheriting the profile's when unset."""
+        return (rule.source or self.source, rule.retrieved or self.retrieved)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -157,7 +232,10 @@ class Profile:
             ),
             "rules": [r.to_dict() for r in self.rules],
             "operations": self.operations,
+            "operations_quotes": self.operations_quotes,
             "encoding": self.encoding.to_dict() if self.encoding else None,
+            "dimensions": self.dimensions.to_dict() if self.dimensions else None,
+            "composition_unresolved": self.composition_unresolved or None,
             "notes": list(self.notes),
         }
 
@@ -186,6 +264,7 @@ CN_VISA_DIGITAL = Profile(
             ),
             measurement="head_width_silhouette",
             lo=191.0, hi=219.0,
+            derivation="205 - 14 = 191, 205 + 14 = 219",
             note=(
                 "Stated at the 354x472 reference size. The sheet's own diagram gives a wider "
                 "191-251 px instead; both readings are recorded in PLAN.md. This profile uses "
@@ -226,7 +305,7 @@ CN_VISA_DIGITAL = Profile(
         "adjust_colour": "unresolved", "synthesize_pixels": "prohibited",
     },
     encoding=Encoding(
-        format="jpeg", colour="srgb_24bit",
+        format="jpeg", colour="srgb_24bit", colour_required="rgb_24bit",
         quote="Colour Space: RGB 24bit true colour. Image Compression: JPEG and the image "
               "file size: 40 KB - 120 KB.",
         interpretation="The sheet does not say which kilobyte it means, so both readings are "
@@ -295,7 +374,311 @@ CN_VISA_PAPER = Profile(
 )
 
 
-PROFILES: dict[str, Profile] = {p.key: p for p in (CN_VISA_DIGITAL, CN_VISA_PAPER)}
+# --- United States ---------------------------------------------------------------------------
+# Sources fetched 2026-09-06, verbatim in docs/sources/us-state-department-2026-09-06.md. Two
+# channels with different rules: the visa photo (DS-160 digital image) and the printed passport
+# photo. The visa page's "22 mm" beside "1 inch" is arithmetically inconsistent (1 in = 25.4 mm)
+# and contradicts the FAQ and the passport page, which say 25; recorded, not applied.
+US_VISA_PHOTOS = "https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos.html"
+US_VISA_FAQ = "https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos/frequently-asked-questions.html"
+US_DIGITAL = "https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos/digital-image-requirements.html"
+US_TEMPLATE = "https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos/photo-composition-template.html"
+US_PASSPORT = "https://travel.state.gov/en/passports/apply/help/photos.html"
+
+US_VISA_DIGITAL = Profile(
+    key="us_visa_digital",
+    jurisdiction="US",
+    destination="United States",
+    channel="visa application (DS-160), digital image",
+    source=US_VISA_PHOTOS,
+    retrieved="2026-09-06",
+    sizes=(OutputSize(600, 600), OutputSize(1200, 1200)),
+    sizes_quote="Minimum acceptable dimensions are 600 x 600 pixels. Maximum acceptable "
+                "dimensions are 1200 x 1200 pixels.",
+    dimensions=DimensionRange(
+        min=OutputSize(600, 600), max=OutputSize(1200, 1200), aspect=(1, 1),
+        quote="The image dimensions must be in a square aspect ratio (the height must be equal "
+              "to the width). Minimum acceptable dimensions are 600 x 600 pixels. Maximum "
+              "acceptable dimensions are 1200 x 1200 pixels.",
+        source=US_DIGITAL,
+    ),
+    rules=(
+        Rule(
+            key="head_height",
+            quote="Sized such that the head is between 1 inch and 1 3/8 inches (22 mm and 35 mm) "
+                  "or 50% and 69% of the image's total height from the bottom of the chin to the "
+                  "top of the head.",
+            measurement="head_height",
+            lo=0.50, hi=0.69, unit="fraction_height",
+            derivation="50% and 69% of the image's total height",
+            note="The FAQ defines the span as 'from the top of the head, including the hair, to "
+                 "the bottom of the chin'; the matte's top row is that quantity. The page's "
+                 "'22 mm' is not applied: 1 inch is 25.4 mm, and the FAQ and the passport page "
+                 "both say 25.",
+        ),
+        Rule(
+            key="eye_line_from_bottom",
+            quote="600 px. \u00b7 600 px. \u00b7 50-69% \u00b7 56-69%",
+            measurement="eye_line_y",
+            lo=0.56, hi=0.69, unit="fraction_height",
+            source=US_TEMPLATE,
+            derivation="56-69% of the image height, from the bottom edge to the eye line",
+            note="A graphic label, not prose: the composition-template page has no body text, "
+                 "and the '56-69%' dimension line on the 'Digital Image Head Size Template' "
+                 "runs from the bottom edge to the eye line. No sentence on any page read "
+                 "states an eye-height rule.",
+        ),
+    ),
+    operations={
+        "crop": "allowed", "resize": "allowed", "encode": "allowed", "colour_convert": "allowed",
+        "rotate": "unresolved", "replace_background": "prohibited",
+        "adjust_colour": "prohibited", "synthesize_pixels": "prohibited",
+    },
+    operations_quotes={
+        "crop": "crop it to a square image of exactly 600 x 600 pixels",
+        "resize": "The image dimensions must be in a square aspect ratio ... Minimum acceptable "
+                  "dimensions are 600 x 600 pixels.",
+        "encode": "The image must be in JPEG file format",
+        "colour_convert": "The image must be in color (24 bits per pixel) in sRGB color space",
+        "replace_background": "Photos must not be digitally enhanced or altered to change your "
+                              "appearance in any way.",
+        "adjust_colour": "Photos must not be digitally enhanced or altered to change your "
+                         "appearance in any way.",
+        "synthesize_pixels": "Photos must not be digitally enhanced or altered to change your "
+                             "appearance in any way.",
+    },
+    encoding=Encoding(
+        format="jpeg", colour="srgb_24bit", colour_required="srgb_24bit",
+        quote="The image must be in color (24 bits per pixel) in sRGB color space which is the "
+              "common output for most digital cameras. The image must be in JPEG file format. "
+              "The image must be less than or equal to 240 kB (kilobytes). The compression ratio "
+              "should be less than or equal to 20:1.",
+        interpretation="'240 kB' is kept under both readings of kB. The compression cap is read "
+                       "as a floor on bytes: width x height x 3 (8-bit RGB) over 20, the written "
+                       "file's bytes counted with their headers. 4:4:4 chroma is this tool's "
+                       "choice; sRGB and 24 bits are the source's.",
+        size_readings=(
+            SizeReading("kB = 1,000 bytes", None, 240_000),
+            SizeReading("kB = 1,024 bytes", None, 245_760),
+        ),
+        max_compression_ratio=20.0,
+        compression_reading="uncompressed bytes = width x height x 3; the file, headers included, "
+                            "must be at least one twentieth of that",
+        source=US_DIGITAL,
+    ),
+    notes=(
+        "The visa page says '1 inch and 1 3/8 inches (22 mm and 35 mm)'; the FAQ and the passport "
+        "page say 25-35 mm, and 1 inch is 25.4 mm. The fraction rule is applied; the millimetre "
+        "figures are not.",
+        "The eye-line band exists only as a label on the composition-template graphic.",
+        "Eyeglasses are not allowed in visa photos (see the advisories).",
+        "The Department's own photo tool crops to 'exactly 600 x 600 pixels', so 600x600 is tried "
+        "first; 1200x1200 second.",
+        "At 1200x1200 the 20:1 cap leaves a band of 216,000-240,000 bytes; the encoder searches "
+        "every integer quality from 98 down for one inside it, and reports if none is.",
+    ),
+)
+
+US_PASSPORT_PRINT = Profile(
+    key="us_passport_print",
+    jurisdiction="US",
+    destination="United States",
+    channel="passport, printed photo",
+    source=US_PASSPORT,
+    retrieved="2026-09-06",
+    sizes=(OutputSize(600, 600),),  # 2 x 2 in at 300 ppi
+    sizes_quote="The correct printed size of a passport photo is 2 x 2 inches (51 x 51 mm).",
+    physical_mm=(50.8, 50.8),
+    rules=(
+        Rule(
+            key="head_height",
+            quote="The size of your head in the printed photo must be between 1 -1 3/8 inches "
+                  "(25 - 35 mm) from the bottom of the chin to the top of the head.",
+            measurement="head_height",
+            lo=25.0, hi=35.0, unit="mm",
+            interpretation="The passport page does not say whether 'the top of the head' "
+                           "includes hair, and allows hair past the frame; the hair-inclusive "
+                           "matte top is used, as the visa FAQ defines the same span.",
+            note="The page's own tips say 'between 1 inch and 1.4 inches (25 and 35 mm)'; "
+                 "1 3/8 in is 34.9 mm and 1.4 in is 35.6 mm. The stated 25-35 mm is applied.",
+        ),
+        Rule(
+            key="eye_line_from_bottom",
+            quote="2 inch \u00b7 2 inch \u00b7 1 inch to 1 3/8 inch \u00b7 1 1/8 inch to 1 3/8 inch",
+            measurement="eye_line_y",
+            lo=28.575, hi=34.925, unit="mm",
+            source=US_TEMPLATE,
+            derivation="1 1/8 in x 25.4 = 28.575 mm; 1 3/8 in x 25.4 = 34.925 mm",
+            interpretation="Taken from the visa-side 'Paper Photo Head Size Template' graphic; "
+                           "the passport pages state no eye-height rule and the passport-side "
+                           "template page does not exist.",
+            note="A graphic label, not prose.",
+        ),
+    ),
+    operations={
+        "crop": "allowed", "resize": "unresolved", "encode": "allowed",
+        "rotate": "unresolved", "replace_background": "prohibited",
+        "adjust_colour": "prohibited", "synthesize_pixels": "prohibited",
+    },
+    operations_quotes={
+        "crop": "Your hair may extend past the edges of the photo, as long as your entire head is "
+                "shown and is the appropriate size.",
+        "resize": "Do not stretch or compress your image to resize it.",
+        "replace_background": "Submit the original, unchanged photo. Do not change your photo "
+                              "using computer software, phone apps or filters, or artificial "
+                              "intelligence.",
+        "adjust_colour": "Do not change your photo using computer software, phone apps or "
+                         "filters, or artificial intelligence.",
+        "synthesize_pixels": "Do not change your photo using computer software, phone apps or "
+                             "filters, or artificial intelligence.",
+    },
+    notes=(
+        "2 inches governs (50.8 mm); the page's '51 x 51 mm' is its rounding.",
+        "'Do not stretch or compress your image to resize it' - uniform scaling to the printed "
+        "size is read as neither, and left unresolved rather than asserted.",
+        "Print output is not produced by this build; this profile plans only.",
+    ),
+)
+
+# --- New Zealand -----------------------------------------------------------------------------
+# Sources fetched 2026-09-06, verbatim in docs/sources/nz-immigration-2026-09-06.md. One page
+# governs visas and the NZeTA alike; the upload-error page and the photographer sheet state the
+# pixel range in text and a different byte band.
+NZ_PHOTOS = "https://www.immigration.govt.nz/process-to-apply/applying-for-a-visa/applying-online/uploading-documents-and-photos/visa-and-nzeta-photos/"
+NZ_ERRORS = "https://www.immigration.govt.nz/process-to-apply/applying-for-a-visa/applying-online/uploading-documents-and-photos/fixing-errors-when-uploading-a-photo/"
+NZ_PHOTOGRAPHER = "https://www.immigration.govt.nz/assets/inz/documents/apply-for-a-visa/Taking-acceptable-visa-photos.pdf"
+
+NZ_NZETA = Profile(
+    key="nz_nzeta",
+    jurisdiction="NZ",
+    destination="New Zealand",
+    channel="NZeTA and online visa application, digital photo",
+    source=NZ_PHOTOS,
+    retrieved="2026-09-06",
+    sizes=(OutputSize(2250, 3000), OutputSize(1500, 2000), OutputSize(900, 1200)),
+    sizes_quote="between 900 x 1200 and 2250 x 3000 pixels",
+    dimensions=DimensionRange(
+        min=OutputSize(900, 1200), max=OutputSize(2250, 3000), aspect=(3, 4),
+        quote="Your photo must be: between 900 x 1200 and 2250 x 3000 pixels; between 500 KB "
+              "and 3 MB, and; in portrait format.",
+        source=NZ_ERRORS,
+    ),
+    rules=(
+        Rule(
+            key="head_height",
+            quote="your face covers between 70% and 80% of the image and is in the middle of "
+                  "the frame",
+            measurement="head_height",
+            lo=0.70, hi=0.80, unit="fraction_height",
+            interpretation="'face covers between 70% and 80% of the image' read as hair-inclusive "
+                           "head height (matte top to chin) over image height; INZ's photographer "
+                           "sheet says 'the length of the head fills 75% of the frame'.",
+            note="The applicant page defines neither 'face' nor 'of the image'. The photographer "
+                 "sheet gives fixed figures instead of a band (head length 75%, head width 70%).",
+        ),
+    ),
+    operations={
+        "crop": "allowed", "resize": "allowed", "encode": "allowed", "colour_convert": "allowed",
+        "rotate": "unresolved", "replace_background": "prohibited",
+        "adjust_colour": "prohibited", "synthesize_pixels": "prohibited",
+    },
+    operations_quotes={
+        "crop": "Your photo must be: between 512 KB and 3.14 MB; taken in portrait mode with 3:4 "
+                "aspect ratio; a JPG or JPEG file.",
+        "resize": "Your photo must be: between 900 x 1200 and 2250 x 3000 pixels",
+        "encode": "a JPG or JPEG file",
+        "colour_convert": "set the colour to sRGB (to match the colours that most video monitors "
+                          "and printers reproduce)",
+        "replace_background": "cropping your head and shoulders to place it on a plain background",
+        "adjust_colour": "changing the colour, brightness, contrast or sharpness",
+        "synthesize_pixels": "digitally removing objects from the photo, especially around the "
+                             "image of your face",
+    },
+    encoding=Encoding(
+        format="jpeg", colour="srgb_24bit", colour_required=None,
+        quote="Your photo must be: between 512 KB and 3.14 MB; taken in portrait mode with 3:4 "
+              "aspect ratio; a JPG or JPEG file.",
+        interpretation="Two INZ pages give different bands - 512 KB to 3.14 MB on the requirements "
+                       "page, 500 KB to 3 MB on the upload-error page and the photographer sheet - "
+                       "and neither says which kilobyte it means. All four readings are kept: the "
+                       "encoder targets their intersection, the validator reports each. The "
+                       "applicant page states no colour requirement; sRGB is this tool's choice "
+                       "(the photographer sheet instructs 'set the colour to sRGB').",
+        size_readings=(
+            SizeReading("requirements page, KB = 1,000 bytes", 512_000, 3_140_000),
+            SizeReading("requirements page, KB = 1,024 bytes", 524_288, 3_292_528),
+            SizeReading("upload-error page, KB = 1,000 bytes", 500_000, 3_000_000),
+            SizeReading("upload-error page, KB = 1,024 bytes", 512_000, 3_145_728),
+        ),
+        source=NZ_PHOTOS,
+    ),
+    notes=(
+        "File size: the requirements page says 512 KB-3.14 MB; the upload-error page and the "
+        "photographer sheet say 500 KB-3 MB. Both are live.",
+        "The pixel range appears on the requirements page only inside an image; the upload-error "
+        "page and the photographer sheet state it in text.",
+        "Background: the requirements page says 'neutral and plain'; the error page suggests "
+        "'light grey'; the photographer sheet requires 'plain, light-coloured (not white)'.",
+        "Largest size first: the byte floor is easier to reach with more pixels.",
+        "The head rule fixes the scale and nothing INZ states places the crop vertically. The "
+        "head's containment in the image is applied as a hard constraint (a rule about its size "
+        "within the image presupposes it is within the image), and the eye line is placed at "
+        "30-50% of the height from the top as this tool's preference, from ICAO TR Portrait "
+        "Quality Table 9 - a composition choice, not INZ's rule, and reported as such.",
+    ),
+)
+
+# --- Schengen ----------------------------------------------------------------------------------
+# Sources fetched 2026-09-06, verbatim in docs/sources/schengen-icao-2026-09-06.md. No EU-level
+# source states a computable composition rule, and the ICAO rule the sources reach governs the
+# printed portrait inside the finished document. This profile plans nothing; it records what is
+# stated and advises.
+EU_GUIDANCE = "https://home-affairs.ec.europa.eu/document/download/5bb16566-c8c2-4afb-b038-530f488cb72a_en?filename=icao_photograph_guidelines_en.pdf"
+EU_VISA_CODE = "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:02009R0810-20200202"
+ICAO_9303_P3 = "https://www.icao.int/sites/default/files/publications/DocSeries/9303_p3_cons_en.pdf"
+
+SCHENGEN_PRINT = Profile(
+    key="schengen_print",
+    jurisdiction="EU",
+    destination="Schengen area",
+    channel="visa application, printed photo",
+    source=EU_GUIDANCE,
+    retrieved="2026-09-06",
+    sizes=(OutputSize(413, 531),),  # 35 x 45 mm at 300 dpi
+    sizes_quote="Submitted portraits should be 45.0 mm x 35.0 mm (1.77 in x 1.38 in) in dimension.",
+    physical_mm=(35.0, 45.0),
+    rules=(),
+    composition_unresolved=(
+        "no computable composition rule: the Visa Code binds photographs to 'ICAO document 9303 "
+        "Part 1, 6th edition'; the only numeric head rule any reviewed source states is Doc 9303 "
+        "Part 3, eighth edition, 3.9.1.3, which measures the crown-to-chin portion of the printed "
+        "portrait 'of the longest dimension defined for Zone V' of the finished document, not the "
+        "submitted photograph, and defines the crown as 'the top of the head ignoring any hair'; "
+        "the EU sheet's 'face takes up 70-80% of the photograph' defines nothing"
+    ),
+    operations={"crop": "unresolved", "resize": "unresolved", "encode": "unresolved",
+                "rotate": "unresolved", "replace_background": "unresolved",
+                "adjust_colour": "unresolved", "synthesize_pixels": "unresolved"},
+    notes=(
+        "The EU sheet states, in full: 'no more than 6-months old'; '35-40mm in width'; 'close "
+        "up of your head and top of your shoulders so that your face takes up 70-80% of the "
+        "photograph'. Its PDF metadata is a 2003 QuarkXPress brochure; no Commission page links "
+        "it.",
+        "The 45.0 x 35.0 mm size is ICAO Doc 9303 Part 3 (eighth edition) 3.9.1.2, not an EU "
+        "instrument; the EU sheet gives only a width range.",
+        "France: 'La taille du visage doit \u00eatre de 32 \u00e0 36 mm ... du bas du menton au sommet "
+        "du cr\u00e2ne (hors chevelure)'; its English FAQ says 'from chin to forehead (excluding "
+        "hair)'. Germany: 'Das Gesicht nimmt 70 bis 80 % der H\u00f6he des Fotos ein' from 'der "
+        "Kinnspitze bis zum oberen Kopfende'. Both hair-exclusive or ambiguous about hair; neither "
+        "applied here (ROADMAP: member-state overlays).",
+        "Print output is not produced by this build.",
+    ),
+)
+
+PROFILES: dict[str, Profile] = {
+    p.key: p for p in (CN_VISA_DIGITAL, CN_VISA_PAPER, US_VISA_DIGITAL, US_PASSPORT_PRINT,
+                       NZ_NZETA, SCHENGEN_PRINT)
+}
 
 
 class ProfileError(RuntimeError):
@@ -331,6 +714,8 @@ def build_constraints(
         a profile error worth surfacing."""
         if bound is None or rule.unit == "px":
             return bound
+        if rule.unit == "fraction_height":
+            return bound * size.height
         if rule.unit != "mm":
             raise ProfileError(f"{profile.key}/{rule.key}: unknown unit {rule.unit!r}")
         if profile.physical_mm is None:
@@ -398,6 +783,24 @@ def build_constraints(
                                        lo_strict=rule.lo_strict, hi_strict=rule.hi_strict))
         else:  # pragma: no cover - guards against a rule added without a handler
             unapplied.append(f"{rule.key}: no handler in this build")
+
+    # A rule about the head's size within the image presupposes the head is within the image.
+    # A profile that states head height but no crown-gap or chin-to-bottom rule therefore gets
+    # the head's containment as HARD constraints - implied by its own rule, earning no slack -
+    # so the solver cannot centre the crop on the source and cut the crown off. Lacking an
+    # eye-line rule, it also gets a vertical placement PREFERENCE: the eye line 30-50% of the
+    # height from the top, ICAO TR Portrait Quality Table 9 (Mv/B), labelled as this tool's
+    # preference exactly as the horizontal one below is, and never in feasibility.
+    rule_keys = {r.key for r in profile.rules}
+    if "head_height" in rule_keys and crown is not None and chin is not None:
+        if "crown_gap" not in rule_keys:
+            constraints.append(Constraint("head_inside_top", a=crown, b=-1.0, lo=0.0, hard=True))
+        if "chin_to_bottom" not in rule_keys:
+            constraints.append(Constraint("head_inside_bottom", a=-chin, b=1.0, k=float(size.height),
+                                          lo=0.0, hard=True))
+    if profile.rules and "eye_line_from_bottom" not in rule_keys and eye_line is not None:
+        constraints.append(Constraint("eye_vertical", a=eye_line, b=-1.0,
+                                      lo=0.30 * size.height, hi=0.50 * size.height, preference=True))
 
     # Horizontal placement. No source surveyed states a numeric band, so this is a tool
     # PREFERENCE rather than anyone's law: keep the eye midpoint within the middle tenth

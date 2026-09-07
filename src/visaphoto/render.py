@@ -79,7 +79,7 @@ def _convert_to_srgb(native) -> tuple[Any, OperationRecord]:
         {"from": name, "to": "sRGB", "intent": "relative_colorimetric"})
 
 
-def _crop_box(plan: Plan, source_size: tuple[int, int]) -> tuple[float, float, float, float]:
+def _crop_box(plan: Plan, source_size: tuple[int, int], attempt=None) -> tuple[float, float, float, float]:
     """The plan's crop as a Pillow box, clamped to the source at the solver's tolerance.
 
     Containment is a hard constraint in the solver, so an edge can land a rounding error outside
@@ -87,11 +87,12 @@ def _crop_box(plan: Plan, source_size: tuple[int, int]) -> tuple[float, float, f
     rejects that outright. Inside `EPS` is noise and is clamped; further out is a solver defect
     and raises rather than being quietly moved.
     """
-    o = plan.chosen.outcome
+    attempt = attempt or plan.chosen
+    o = attempt.outcome
     w, h = source_size
     raw = (o.crop_x, o.crop_y,
-           o.crop_x + plan.chosen.size.width / o.scale,
-           o.crop_y + plan.chosen.size.height / o.scale)
+           o.crop_x + attempt.size.width / o.scale,
+           o.crop_y + attempt.size.height / o.scale)
     limits = (0.0, 0.0, float(w), float(h))
     box = []
     for value, limit, is_lower in zip(raw, limits, (True, True, False, False)):
@@ -102,23 +103,45 @@ def _crop_box(plan: Plan, source_size: tuple[int, int]) -> tuple[float, float, f
     return tuple(box)
 
 
-def render(source: Source, plan: Plan) -> RenderResult:
-    """Apply the plan's crop to the decoded source. Colour first, then one resample."""
+def render(source: Source, plan: Plan, profile=None, attempt=None) -> RenderResult:
+    """Apply the plan's crop to the decoded source. Colour first, then one resample.
+
+    `attempt` selects one of the plan's feasible sizes (default: the chosen one), so the CLI
+    can fall back along the profile's order when a size cannot be encoded. `profile` supplies
+    the operation policy: an operation the channel marks `prohibited` is refused; `unresolved`
+    means allowed for crop, resize and colour conversion, since every destination states
+    dimensions and a format, and that reading is recorded.
+    """
     from PIL import Image
 
     history: list[OperationRecord] = []
-    if not plan.feasible:
+    attempt = attempt or plan.chosen
+    if not plan.feasible or attempt is None:
         history.append(OperationRecord("crop_resize", "refused", "no feasible crop in the plan"))
         return RenderResult(None, history)
+    policy = (profile.operations if profile is not None else {})
 
-    image, colour = _convert_to_srgb(source.native)
-    history.append(colour)
+    if policy.get("colour_convert") == "prohibited":
+        image = source.native if source.native.mode == "RGB" else source.native.convert("RGB")
+        history.append(OperationRecord(
+            "colour_convert", "skipped",
+            f"assumed sRGB: {profile.key} prohibits colour conversion; pixels written as they are"))
+    else:
+        image, colour = _convert_to_srgb(source.native)
+        history.append(colour)
 
-    box = _crop_box(plan, image.size)
-    size = (plan.chosen.size.width, plan.chosen.size.height)
+    for op in ("crop", "resize"):
+        if policy.get(op) == "prohibited":
+            history.append(OperationRecord(
+                "crop_resize", "refused",
+                f"{profile.key} prohibits {op}: " + profile.operations_quotes.get(op, "no sentence recorded")))
+            return RenderResult(None, history)
+
+    box = _crop_box(plan, image.size, attempt)
+    size = (attempt.size.width, attempt.size.height)
     out = image.resize(size, Image.Resampling.LANCZOS, box=box)
     history.append(OperationRecord(
         "crop_resize", "done", "single Lanczos resample through a float crop box",
-        {"box": list(box), "scale": plan.chosen.outcome.scale,
+        {"box": list(box), "scale": attempt.outcome.scale,
          "output": {"width": size[0], "height": size[1]}}))
     return RenderResult(out, history)
