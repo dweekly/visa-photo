@@ -34,14 +34,17 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   under both readings of KB; strict bounds; `--spec` selects the destination's advisories; one
   report envelope with a version. Plan and scope in
   [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md). Three review passes, a decision, a receipt.
-- **Solver objective when a preference is unsatisfiable** (Stage 2 follow-up). The centring
-  preference's slack takes part in the min-slack objective; when the preference cannot be met
-  its negative slack dominates the minimum at every crop, and the search no longer sees the
-  requirements' slack. Reproduction: `reference_measurements(head_width_silhouette=200,
-  inter_eye_distance=100, matte_top_row=1000, eye_line_y=1200, chin_landmark_y=1400,
-  eye_mid_x=150)` under `cn_visa_digital` chooses scale 1.03 with crown gap 10 and eye line
-  256 (min slack 0) while scale 1.02 gives eye line 258. Fix direction: maximize the
-  requirements' slack first; use preferences only to choose among crops that tie.
+- **Slack normalization across one-sided rules and bands** (Stage 2 follow-up). A band's slack
+  is normalized by its width and a one-sided rule's by 1.0, so one pixel above "> 256" counts
+  as much as 17% of a band. On a face with a thin feasible window (eyes far left: head width
+  200, IED 100, matte top 1000, eye line 1200, chin 1400, eye mid x 150, under
+  `cn_visa_digital`) the solver balances all three at 0.169 and leaves the eye line 0.17 px
+  above its bound while the crown gap keeps 10 px and the face width 4.7 px - a crop the
+  post-write delta (0.8 px on the reference photo) will call indeterminate. Candidate: one
+  unit for every rule, pixels, so the solver maximizes the smallest pixel margin; the
+  reference photo's crop is unchanged under it (its binding margin is the 14-px face-width
+  half-band either way). Changes every reported slack; do it as its own PR with the
+  normalization stated in `docs/STAGE2-SOLVER.md`.
 - **Stage 5 — seeded profiles, the skill, a first release.** In progress on PR #8 (profiles)
   with a second PR for the skill and `0.1.0`. `us_visa_digital` and `nz_nzeta` crop, write and
   check; `us_passport_print` and `cn_visa_paper` plan only; `schengen_print` refuses to crop

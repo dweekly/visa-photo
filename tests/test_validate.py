@@ -91,12 +91,9 @@ class TestStrictBoundsInTheSchema:
         assert interval_verdict(predicted["inter_eye_distance"], 0.0, 60.0, None, lo_strict=True) is Verdict.FAIL
 
     def test_solver_does_not_refuse_a_feasible_face_whose_optimum_lands_on_a_strict_bound(self):
-        """Review reproduction. The centring preference cannot be met for this face and its
-        negative slack dominates the objective, so the solver picks a zero-slack crop (crown gap
-        10, eye line 256) although scale 1.02 gives eye line 258. A solver-side strict refusal
-        called this infeasible; it is not. The objective defect is on ROADMAP under "Solver
-        objective when a preference is unsatisfiable"; until it is fixed this asserts only that
-        the crop is found."""
+        """Review reproduction. The centring preference cannot be met for this face. A solver-side
+        strict refusal once called this infeasible; it is not. The crop must be found, and with
+        preferences only breaking ties (test_geometry.TestPreferencesOnlyBreakTies) it has slack."""
         from tests.test_plan import reference_measurements
 
         m = reference_measurements(head_width_silhouette=200.0, inter_eye_distance=100.0,
@@ -104,7 +101,7 @@ class TestStrictBoundsInTheSchema:
                                    chin_landmark_y=1400.0, eye_mid_x=150.0)
         plan = make_plan(CN_VISA_DIGITAL, m)
         assert plan.feasible, plan.attempts[0].outcome
-        assert predict(CN_VISA_DIGITAL, plan, m)["eye_line_from_bottom"] >= 256.0
+        assert predict(CN_VISA_DIGITAL, plan, m)["eye_line_from_bottom"] > 256.0
 
     def test_the_same_point_just_above_the_bound_solves(self):
         from tests.test_plan import reference_measurements

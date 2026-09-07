@@ -27,6 +27,12 @@ Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 - `--spec` selects the channel's advisories: the US visa page requires a neutral expression
   and the passport page permits a smile, and the tool warns accordingly.
 
+### Changed (unreleased, solver)
+- A composition preference (keeping the eyes centred) now decides only between crops that
+  satisfy the destination's rules equally well. A face whose eyes sit far to one side, where
+  the preference cannot be met, previously got a crop with the eye line exactly on its bound
+  although one with room existed; it now gets the one with room.
+
 ### Added (unreleased, Stage 4)
 - After `--out`, the written file is reopened, measured afresh, and checked rule by rule from
   its own measurements: `pass`, `fail`, `indeterminate` or `not_evaluated`, each with the

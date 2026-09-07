@@ -277,3 +277,47 @@ class TestReviewPassTwo:
         text = json.dumps(result.to_dict())  # would raise or emit Infinity otherwise
         assert "Infinity" not in text
         assert result.to_dict()["scale_bands"]["one_sided"][1] is None
+
+
+class TestPreferencesOnlyBreakTies:
+    """A preference decides between crops that satisfy the rules equally well, and nothing else.
+    The face here has its eyes far to the left, so the centring preference cannot be met and its
+    slack is negative at every crop. That must not cost the requirements any slack."""
+
+    def measurements(self):
+        from tests.test_plan import reference_measurements
+
+        return reference_measurements(head_width_silhouette=200.0, inter_eye_distance=100.0,
+                                      matte_top_row=1000.0, eye_line_y=1200.0,
+                                      chin_landmark_y=1400.0, eye_mid_x=150.0)
+
+    def test_the_scale_is_the_one_chosen_with_no_preference_at_all(self):
+        from visaphoto.profiles import CN_VISA_DIGITAL, OutputSize, build_constraints
+
+        constraints, _ = build_constraints(CN_VISA_DIGITAL, OutputSize(354, 472), self.measurements())
+        with_pref = solve(constraints, 354, 472)
+        without = solve([c for c in constraints if not c.preference], 354, 472)
+        assert isinstance(with_pref, Solution) and isinstance(without, Solution)
+        assert with_pref.scale == pytest.approx(without.scale, abs=1e-9)
+        assert with_pref.crop_y == pytest.approx(without.crop_y, abs=1e-6)
+        assert with_pref.min_slack > 0.0 and with_pref.min_slack == pytest.approx(without.min_slack, abs=1e-9)
+        assert with_pref.slacks["eye_centred"] < 0  # still reported, still unmet
+
+    def test_the_review_reproduction_has_slack_on_every_requirement(self):
+        """With the preference dragging the objective this face got crown gap 10.0 and eye line
+        256.0 exactly - min slack zero. Now every requirement has room. How much room each gets
+        is the normalization's doing, not this fix's: one-sided rules count slack per pixel and
+        bands per band width, which here leaves the eye line 0.17 px above its bound while the
+        crown gap keeps 10 px (ROADMAP, "Slack normalization across one-sided rules and bands")."""
+        from visaphoto.geometry import EPS
+        from visaphoto.plan import make_plan
+        from visaphoto.profiles import CN_VISA_DIGITAL
+        from visaphoto.validate import predict
+
+        plan = make_plan(CN_VISA_DIGITAL, self.measurements())
+        assert plan.feasible
+        assert plan.chosen.outcome.min_slack > 0.1
+        predicted = predict(CN_VISA_DIGITAL, plan, self.measurements())
+        assert predicted["eye_line_from_bottom"] > 256.0 + EPS
+        assert predicted["crown_gap"] > 10.0 + 1.0
+
