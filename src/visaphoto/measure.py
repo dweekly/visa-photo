@@ -90,6 +90,7 @@ def measure_photo(
     jurisdiction: str | None = None,
     segmentation_enabled: bool = True,
     source: Source | None = None,
+    profile: str | None = None,
 ):
     """Measure `photo` and run pre-flight checks.
 
@@ -118,5 +119,6 @@ def measure_photo(
 
     result = measure_all(pixels, lm, matte, source=str(photo),
                          segmentation_attempted=segmentation_enabled)
-    report = preflight_mod.run(result, dict(lm.blendshapes or {}), jurisdiction=jurisdiction)
+    report = preflight_mod.run(result, dict(lm.blendshapes or {}), jurisdiction=jurisdiction,
+                               profile=profile)
     return result, report

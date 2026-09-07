@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .measurements import Flag, MeasurementSet
-from .requirements import GENERIC_ADVISORIES, Check, Requirement, for_jurisdiction
+from .requirements import GENERIC_ADVISORIES, REQUIREMENTS, Check, Requirement, for_jurisdiction
 from .thresholds import (
     EYES_OBSCURED_RATIO,
     EYE_GLARE_FRACTION,
@@ -168,6 +168,7 @@ def run(
     result: MeasurementSet,
     blendshapes: dict[str, float],
     jurisdiction: str | None = None,
+    profile: str | None = None,
 ) -> Preflight:
     flags = _expression_flags(blendshapes, result)
     ied = result.value("inter_eye_distance")
@@ -176,15 +177,21 @@ def run(
         mode, requirements, code = "generic", list(GENERIC_ADVISORIES), None
     else:
         code = jurisdiction.upper()
-        requirements = list(for_jurisdiction(code))
-        mode = "jurisdiction" if requirements else "unseeded"
+        requirements = list(for_jurisdiction(code, profile))
+        seeded = any(code in r.jurisdictions for r in REQUIREMENTS)
+        mode = "jurisdiction" if seeded else "unseeded"
+        # A seeded jurisdiction whose every requirement is channel-specific (the US) has none
+        # to apply under a bare --for; the generic set stands in, labelled GENERIC, rather than
+        # the jurisdiction being reported as unseeded.
         # A destination we have transcribed may say nothing about expression - we have no
         # verbatim expression rule for the US or NZ, for instance. Without this, a photo with
         # both eyes shut detected the problem and then reported nothing, because no
         # requirement claimed that signal. Generic advisories fill only the uncovered signals,
         # and stay labelled GENERIC so they are never mistaken for that country's law.
-        if requirements:
-            covered = {s for r in requirements for s in r.signals}
+        if seeded:
+            # A signal a requirement permits is covered too: "You can smile" is the source's
+            # answer on smiling, and the generic advisory must not contradict it.
+            covered = {s for r in requirements for s in (*r.signals, *r.permits)}
             requirements += [
                 advisory for advisory in GENERIC_ADVISORIES
                 if advisory.signals and not set(advisory.signals) <= covered

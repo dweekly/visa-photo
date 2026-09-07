@@ -235,10 +235,10 @@ is unchanged.
 
 - [x] This document, reviewed once by Codex (GPT-6 Astra, high); sources and the China
       receipt committed; README rows.
-- [ ] Schema: `fraction_height` in solver and validator, `interpretation`, `derivation`,
+- [x] Schema: `fraction_height` in solver and validator, `interpretation`, `derivation`,
       per-rule provenance, `dimensions`, colour requirement, compression floor, ordered sizes
       with encode retry, renderer policy, `Requirement.profiles`, `applied_rules` in the plan.
-- [ ] Profiles and advisories, with tests; the provenance walk.
+- [x] Profiles and advisories, with tests; the provenance walk.
 - [ ] Real runs (China receipt reproduced; NZ written; US refused with the arithmetic);
       review under the two-pass rule; merge 5a.
 - [ ] 5b: plugin and skill; version test; CHANGELOG and README; PUBLISHING.md; review; merge;
