@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "visa-photo"
-version = "0.1.0.dev0"
+dynamic = ["version"]
 description = "Make a portrait satisfy a specific country's visa photo rules - and say honestly when it can't."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "David E. Weekly" }]
 requires-python = ">=3.10,<3.13"
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: MIT License",
   "Topic :: Multimedia :: Graphics",
 ]
@@ -38,9 +38,16 @@ visa-photo = "visaphoto.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/dweekly/visa-photo"
+Repository = "https://github.com/dweekly/visa-photo"
+Changelog = "https://github.com/dweekly/visa-photo/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The version lives in one place, visaphoto/__init__.py; the plugin manifest and the docs
+# name the same string, and tests/test_version.py holds them to it.
+[tool.setuptools.dynamic]
+version = { attr = "visaphoto.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

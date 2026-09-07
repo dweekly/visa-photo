@@ -69,7 +69,7 @@ def _render(measurements, preflight, validated: bool = False) -> None:
     if preflight.mode == "unseeded":
         print(f"  No transcribed requirements for {preflight.jurisdiction}.")
         print("  This tool will not invent a specification. Run without --for to get generic")
-        print("  advisories, or contribute a cited profile - see CONTRIBUTING.")
+        print("  advisories, or contribute a cited profile - see docs/STAGE5-PROFILES.md.")
     for finding in preflight.findings:
         print(f"  [{_SYMBOL[finding.outcome]}] {finding.requirement.key}")
         print(f"         {finding.detail}")
