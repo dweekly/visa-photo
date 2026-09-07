@@ -239,7 +239,8 @@ is unchanged.
       per-rule provenance, `dimensions`, colour requirement, compression floor, ordered sizes
       with encode retry, renderer policy, `Requirement.profiles`, `applied_rules` in the plan.
 - [x] Profiles and advisories, with tests; the provenance walk.
-- [ ] Real runs (China receipt reproduced; NZ written; US refused with the arithmetic);
-      review under the two-pass rule; merge 5a.
-- [ ] 5b: plugin and skill; version test; CHANGELOG and README; PUBLISHING.md; review; merge;
-      tag `v0.1.0`; David publishes.
+- [x] Real runs (China receipt reproduced; NZ written; US refused with the arithmetic);
+      review under the two-pass rule; 5a merged (PR #8).
+- [x] 5b: plugin and skill; version test; CHANGELOG and README; PUBLISHING.md; review;
+      merged (PR #9); tagged `v0.1.0`.
+- [ ] David publishes to PyPI and smoke-tests `uvx visa-photo` from a clean machine.

@@ -45,11 +45,13 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   reference photo's crop is unchanged under it (its binding margin is the 14-px face-width
   half-band either way). Changes every reported slack; do it as its own PR with the
   normalization stated in `docs/STAGE2-SOLVER.md`.
-- **Stage 5 — seeded profiles, the skill, a first release.** 5a merged 2026-09-07 (PR #8):
-  `us_visa_digital` and `nz_nzeta` crop, write and check; `us_passport_print` and
-  `cn_visa_paper` plan only; `schengen_print` refuses to crop with the reason and advises. 5b
-  in progress on PR #9: the plugin and skill, one version, `0.1.0`. Plan and
-  sources in [docs/STAGE5-PROFILES.md](docs/STAGE5-PROFILES.md).
+- ~~**Stage 5 — seeded profiles, the skill, a first release.**~~ Merged 2026-09-07 (PR #8,
+  PR #9); released as `v0.1.0`. `us_visa_digital` and `nz_nzeta` crop, write and check;
+  `us_passport_print` and `cn_visa_paper` plan only; `schengen_print` refuses to crop with the
+  reason and advises; the repository is its own Claude Code plugin marketplace with the
+  visa-photo skill; one version, held by a test. Plan and sources in
+  [docs/STAGE5-PROFILES.md](docs/STAGE5-PROFILES.md); the release checklist in
+  [docs/PUBLISHING.md](docs/PUBLISHING.md).
 - **After 0.1.0, from the Stage 5 review.** Member-state overlays (France 32–36 mm, Germany
   70–80%, children 50–80% — all hair-exclusive or ambiguous about hair); US passport online
   renewal as its own channel; the template graphics saved as assets; a redistributable
