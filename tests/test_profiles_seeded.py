@@ -166,6 +166,32 @@ class TestPlans:
         p = predict(NZ_NZETA, plan, reference_measurements())
         assert 0.70 * 3000 <= p["head_height"] <= 0.80 * 3000
 
+    @pytest.mark.parametrize("profile", [NZ_NZETA, US_VISA_DIGITAL])
+    def test_the_head_stays_inside_the_crop_on_every_size(self, profile):
+        """Review reproduction: with only a head-height rule the crop was centred on the source
+        and the crown landed at y=-750. The head's containment is implied by the rule; the eye
+        line is then placed by the ICAO-derived preference, never above the top."""
+        m = wide_measurements()
+        plan = make_plan(profile, m)
+        assert plan.feasible
+        for attempt in plan.feasible_attempts:
+            o = attempt.outcome
+            s, oy = o.scale, o.crop_y
+            crown = (m.value("matte_top_row") - oy) * s
+            chin = (m.value("chin_landmark_y") - oy) * s
+            assert 0.0 <= crown and chin <= attempt.size.height, (attempt.size, crown, chin)
+            if profile is NZ_NZETA:
+                eye = (m.value("eye_line_y") - oy) * s
+                assert 0.30 * attempt.size.height - 1 <= eye <= 0.50 * attempt.size.height + 1
+                assert "eye_vertical" in o.slacks and "head_inside_top" in o.slacks
+
+    def test_china_gets_no_implied_containment_or_vertical_preference(self):
+        from visaphoto.profiles import build_constraints
+
+        constraints, _ = build_constraints(CN_VISA_DIGITAL, OutputSize(354, 472), reference_measurements())
+        names = {c.rule for c in constraints}
+        assert not names & {"head_inside_top", "head_inside_bottom", "eye_vertical"}
+
     def test_schengen_applies_nothing_and_says_why(self):
         plan = make_plan(SCHENGEN_PRINT, reference_measurements())
         assert not plan.feasible and plan.applied_rules() == []
@@ -202,6 +228,14 @@ class TestValidateNewRules:
         assert (head.lo, head.hi) == (pytest.approx(300.0), pytest.approx(414.0)) and head.unit == "px"
         assert head.stated == {"lo": 0.50, "hi": 0.69, "unit": "fraction_height"}
         assert head.verdict is Verdict.PASS and "stated 0.5-0.69 fraction_height at 600 px" in head.detail
+
+    def test_validation_lists_the_channels_attestations_and_gaps(self):
+        plan = make_plan(US_VISA_DIGITAL, wide_measurements())
+        v = validate(US_VISA_DIGITAL, facts_like(size=(600, 600), nbytes=100_000),
+                     output_measurements_for(US_VISA_DIGITAL, plan), None)
+        assert {a["key"] for a in v.attestations} == {"head_covering_us_visa", "recency_us_visa"}
+        assert {n["key"] for n in v.not_assessable} == {"background_us_visa", "glasses_us_visa"}
+        assert v.policies["replace_background"] == "prohibited"
 
     def test_fraction_bounds_scale_with_the_files_height(self):
         plan = make_plan(US_VISA_DIGITAL, wide_measurements())

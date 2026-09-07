@@ -620,6 +620,11 @@ NZ_NZETA = Profile(
         "Background: the requirements page says 'neutral and plain'; the error page suggests "
         "'light grey'; the photographer sheet requires 'plain, light-coloured (not white)'.",
         "Largest size first: the byte floor is easier to reach with more pixels.",
+        "The head rule fixes the scale and nothing INZ states places the crop vertically. The "
+        "head's containment in the image is applied as a hard constraint (a rule about its size "
+        "within the image presupposes it is within the image), and the eye line is placed at "
+        "30-50% of the height from the top as this tool's preference, from ICAO TR Portrait "
+        "Quality Table 9 - a composition choice, not INZ's rule, and reported as such.",
     ),
 )
 
@@ -778,6 +783,24 @@ def build_constraints(
                                        lo_strict=rule.lo_strict, hi_strict=rule.hi_strict))
         else:  # pragma: no cover - guards against a rule added without a handler
             unapplied.append(f"{rule.key}: no handler in this build")
+
+    # A rule about the head's size within the image presupposes the head is within the image.
+    # A profile that states head height but no crown-gap or chin-to-bottom rule therefore gets
+    # the head's containment as HARD constraints - implied by its own rule, earning no slack -
+    # so the solver cannot centre the crop on the source and cut the crown off. Lacking an
+    # eye-line rule, it also gets a vertical placement PREFERENCE: the eye line 30-50% of the
+    # height from the top, ICAO TR Portrait Quality Table 9 (Mv/B), labelled as this tool's
+    # preference exactly as the horizontal one below is, and never in feasibility.
+    rule_keys = {r.key for r in profile.rules}
+    if "head_height" in rule_keys and crown is not None and chin is not None:
+        if "crown_gap" not in rule_keys:
+            constraints.append(Constraint("head_inside_top", a=crown, b=-1.0, lo=0.0, hard=True))
+        if "chin_to_bottom" not in rule_keys:
+            constraints.append(Constraint("head_inside_bottom", a=-chin, b=1.0, k=float(size.height),
+                                          lo=0.0, hard=True))
+    if profile.rules and "eye_line_from_bottom" not in rule_keys and eye_line is not None:
+        constraints.append(Constraint("eye_vertical", a=eye_line, b=-1.0,
+                                      lo=0.30 * size.height, hi=0.50 * size.height, preference=True))
 
     # Horizontal placement. No source surveyed states a numeric band, so this is a tool
     # PREFERENCE rather than anyone's law: keep the eye midpoint within the middle tenth

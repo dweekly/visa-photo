@@ -380,7 +380,7 @@ def validate(profile: Profile, facts: FileFacts, measurements: MeasurementSet, p
     else:
         aggregate = "passes_implemented_checks"
 
-    applicable = for_jurisdiction(profile.jurisdiction)
+    applicable = for_jurisdiction(profile.jurisdiction, profile.key)
     attestations = [{"key": r.key, "quote": r.quote} for r in applicable
                     if r.check is Check.USER_ATTESTATION]
     not_assessable = [{"key": r.key, "quote": r.quote, "reason": r.note or "no check in this build"}
