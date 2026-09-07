@@ -4,9 +4,17 @@ User-facing changes, newest first. Cited from [README.md](README.md).
 
 ## Unreleased
 
-Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
+Nothing yet.
 
-### Added (unreleased, Stage 5a)
+## 0.1.0 - 2026-09-07
+
+First release. Six profiles: `cn_visa_digital`, `us_visa_digital` and `nz_nzeta` crop, write
+and check a photograph end to end; `cn_visa_paper` and `us_passport_print` plan a crop but do
+not write a print; `schengen_print` refuses to crop, with the reason, and advises. Install with
+`uvx --python 3.12 visa-photo --fetch-models`, or as a Claude Code plugin from this repository.
+Progress by stage is in [ROADMAP.md](ROADMAP.md).
+
+### Added (Stage 5a)
 - Three destinations join China, each built from sentences on official pages fetched on
   2026-09-06 and kept verbatim under `docs/sources/`. `us_visa_digital` (square 600-1200 px,
   head 50-69% and eye line 56-69% of image height, JPEG at most 240 kB, 24-bit sRGB, 20:1
@@ -27,13 +35,13 @@ Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 - `--spec` selects the channel's advisories: the US visa page requires a neutral expression
   and the passport page permits a smile, and the tool warns accordingly.
 
-### Changed (unreleased, solver)
+### Changed (solver)
 - A composition preference (keeping the eyes centred) now decides only between crops that
   satisfy the destination's rules equally well. A face whose eyes sit far to one side, where
   the preference cannot be met, previously got a crop with the eye line exactly on its bound
   although one with room existed; it now gets the one with room.
 
-### Added (unreleased, Stage 4)
+### Added (Stage 4)
 - After `--out`, the written file is reopened, measured afresh, and checked rule by rule from
   its own measurements: `pass`, `fail`, `indeterminate` or `not_evaluated`, each with the
   observed value, the plan's prediction, their delta and the reason. Encoding is checked from
@@ -48,7 +56,7 @@ Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 - `--json` emits one envelope for every photo run - `report_version`, `tool`, `error`, then each
   stage, `null` when not reached - documented under "The report" in the README.
 
-### Added (unreleased, Stage 3)
+### Added (Stage 3)
 - `--out FILE` renders the planned crop and writes it (requires `--spec` and a digital profile).
   The photo is decoded once; an embedded colour profile (Display P3 on iPhone photos) is
   converted to sRGB, and a photo without one is written as-is with the assumption stated. Crop
@@ -62,7 +70,7 @@ Nothing released yet. Progress by stage is in [ROADMAP.md](ROADMAP.md).
 - The report records what was done to the pixels, in order - colour conversion, crop and
   resize (box, scale, output size), encoding (quality, bytes, trace) - and claims nothing else.
 
-### Changed (unreleased, Stage 1b)
+### Changed (Stage 1b)
 - A measurement is now unavailable unless every gate it declares is affirmatively true. Gates
   are evaluated once into a frozen, tri-state record before anything is emitted. The report
   lists every failed and every not-evaluated gate, not the first.

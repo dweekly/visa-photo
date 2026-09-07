@@ -3,9 +3,37 @@
 Turn an ordinary portrait into a photo that satisfies a specific country's visa or passport
 photo rules — and, just as importantly, tell you honestly when it can't.
 
-**Status: early. Stages 1–3 of 5 merged, Stage 4 in progress** — it measures a portrait, plans
-a crop against China's digital rules, writes the file, and (Stage 4) checks the written file rule
-by rule. One destination so far. See [ROADMAP.md](ROADMAP.md).
+**Status: 0.1.0.** Six profiles from four destinations, each built from sentences on the
+official pages (kept verbatim under [docs/sources/](docs/sources/)). China's digital visa photo,
+the US visa photo (DS-160) and New Zealand's NZeTA photo are cropped, written and checked end to
+end; China's paper photo and the US printed passport photo are planned but not printed; the
+Schengen photo is refused with the reason — no source defines its head size in a way this build
+can measure — and advised on. What is next is in [ROADMAP.md](ROADMAP.md).
+
+## Install and run
+
+```sh
+uvx --python 3.12 visa-photo --fetch-models        # once: model weights, the only network use
+uvx --python 3.12 visa-photo --list-specs            # the destinations and channels that exist
+uvx --python 3.12 visa-photo photo.heic --spec cn_visa_digital --out out.jpg
+uvx --python 3.12 visa-photo out.jpg --spec cn_visa_digital --validate   # a photo you already have
+```
+
+`--python 3.12` matters: the face-landmark library publishes no wheels past 3.12, so the
+package declares `requires-python <3.13` and will not install on a newer interpreter (its
+newer major version aborts outright on macOS; see [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md)).
+After `--fetch-models` nothing leaves your machine. Add `--json` for the report described below.
+
+**From Claude Code**, the repository is its own plugin marketplace:
+
+```sh
+claude plugin marketplace add dweekly/visa-photo
+claude plugin install visa-photo@visa-photo
+```
+
+The skill it installs tells Claude to run the tool rather than crop by hand, to refuse
+destinations it does not know rather than invent a specification, and to quote the report's
+verdicts rather than summarise them as "compliant".
 
 ## The problem this solves
 
@@ -24,7 +52,7 @@ that is too small, sized by a constraint that does not govern the file you are u
 
 That class of error is invisible without measurement, and it is what this tool exists to prevent.
 
-## What it will do
+## What it does
 
 1. **Measure** the photo — eye centres, chin, crown, head pose — with stated uncertainty, and say
    *unavailable* rather than guessing when a measurement can't be made reliably.
@@ -96,6 +124,8 @@ Exit codes are in `visa-photo --help`.
 | [docs/STAGE3-RENDER.md](docs/STAGE3-RENDER.md) | Working plan for rendering and encoding: what is in, what is out and why. Fresh as of 2026-09-06. |
 | [docs/STAGE4-VALIDATE.md](docs/STAGE4-VALIDATE.md) | Working plan for validating the written file and the report contract. Fresh as of 2026-09-06. |
 | [docs/STAGE5-PROFILES.md](docs/STAGE5-PROFILES.md) | Working plan for the US, New Zealand and Schengen profiles, the Claude skill, and the 0.1.0 release. Fresh as of 2026-09-06. |
+| [docs/PUBLISHING.md](docs/PUBLISHING.md) | How a release is cut: docs first, one version, the wheel checked outside the checkout, then the tag and PyPI. Fresh as of 2026-09-07. |
+| [skills/visa-photo/SKILL.md](skills/visa-photo/SKILL.md) | The Claude Code skill: what it must and must not do with this tool. Fresh as of 2026-09-07. |
 | [docs/sources/](docs/sources/) | Verbatim quotations from the official pages each profile is built from, with URLs and retrieval dates. Fresh as of 2026-09-06. |
 | [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md) | Approaches that failed, so they aren't retried. Fresh as of 2026-09-04. |
 | [ROADMAP.md](ROADMAP.md) | Stack-ranked next steps. Fresh as of 2026-09-06. |

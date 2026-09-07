@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "visa-photo",
+  "version": "0.1.0",
+  "description": "Crop, write and check a portrait against a specific country's visa or passport photo rules with the visa-photo CLI - and say honestly what could not be checked.",
+  "author": {
+    "name": "David E. Weekly",
+    "url": "https://david.weekly.org/"
+  },
+  "homepage": "https://github.com/dweekly/visa-photo",
+  "repository": "https://github.com/dweekly/visa-photo",
+  "license": "MIT",
+  "keywords": [
+    "visa",
+    "passport",
+    "photo",
+    "compliance",
+    "crop"
+  ]
+}

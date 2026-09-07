@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "visa-photo",
+  "owner": {
+    "name": "David E. Weekly",
+    "url": "https://david.weekly.org/"
+  },
+  "description": "The visa-photo plugin, served from its own repository.",
+  "plugins": [
+    {
+      "name": "visa-photo",
+      "source": "./",
+      "description": "Crop, write and check a portrait against a country's visa or passport photo rules; refuses to guess."
+    }
+  ]
+}
