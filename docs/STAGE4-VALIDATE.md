@@ -59,8 +59,8 @@ passes, without cropping it. The same validator answers that.
 5. **Strict bounds are strict.** *(review)* China's sheet says inter-eye distance "> 60 pixels"
    and eye line "> 256 pixels"; the rule and constraint schema record inclusivity and the
    validator fails a value equal to an exclusive bound. The solver does not refuse such a
-   point: its optimum can land on a bound while crops with slack exist, when a preference is
-   unsatisfiable (a Stage 2 objective defect, on ROADMAP), so a refusal there would be false.
+   point: a feasible set of exactly one point on a strict bound is solved and then failed,
+   with the value shown.
    No pixel tolerance is added to approximate ">". *Check:* equality on each strict bound
    fails; 60.01 passes; an interval touching an exclusive endpoint is `indeterminate`; a face
    whose crop is pinned to a strict bound is solved and then failed by the validator; the
@@ -178,11 +178,11 @@ derives `min_bytes` / `max_bytes` as their intersection for the encoder.
 ## Declined or adjusted from the review
 
 - *Honour strictness in solver solution acceptance* is not taken. A refusal of the chosen point
-  when it lies on a strict bound was built and reviewed out: the solver's optimum lands on a
-  bound with feasible crops elsewhere whenever the centring preference is unsatisfiable (its
-  negative slack dominates the min-slack objective), so the refusal called feasible faces
-  infeasible. Strictness is enforced where the value is known — the validator — and the
-  objective defect is filed under Stage 2 on ROADMAP.
+  when it lies on a strict bound was built and reviewed out: it called a feasible face
+  infeasible when the solver, with a preference it could not meet dragging its objective, had
+  chosen a zero-slack crop over one with room. That objective defect is fixed in the solver
+  (preferences only break ties); strictness is enforced where the value is known, in the
+  validator.
 - *Return structured unapplied information from `build_constraints`* is met by the validator
   looking the rule's measurement up on the measurement set, which already carries the status
   and both gate lists; the planner's rendered strings are unchanged.
