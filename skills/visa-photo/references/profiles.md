@@ -1,4 +1,4 @@
-# Profiles in 0.1.0
+# Profiles
 
 `visa-photo --list-specs` is authoritative. Every rule quotes the sentence it applies, with its
 page and retrieval date; the quotations are kept verbatim under `docs/sources/` in the
@@ -20,8 +20,8 @@ repository. Where a sentence defines nothing, the reading applied is on the rule
 - China's "> 60 pixels" and "> 256 pixels" are strict; a value on the bound fails.
 - The US visa page says "22 mm" where 1 inch is 25.4 mm; the fraction rule is applied.
 - New Zealand's two byte bands: a file inside 524,288-3,000,000 bytes satisfies every reading.
-- The reference portrait used in development cannot satisfy the US square: its head needs a
-  wider crop than the source has. Expect that refusal on tight portraits and report it.
+- Portraits with little margin above or beside the head cannot satisfy the US square: the
+  plan exits 4 naming the conflicting rules. Report the refusal; do not pad the image.
 
 ## What no profile can check
 

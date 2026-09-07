@@ -19,9 +19,10 @@ uvx --python 3.12 visa-photo photo.heic --spec cn_visa_digital --out out.jpg
 uvx --python 3.12 visa-photo out.jpg --spec cn_visa_digital --validate   # a photo you already have
 ```
 
-`--python 3.12` matters: the face landmarker's supported wheels stop at 3.12 and it aborts on a
-later interpreter (see [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md)). After `--fetch-models`
-nothing leaves your machine. Add `--json` for the report described below.
+`--python 3.12` matters: the face-landmark library publishes no wheels past 3.12, so the
+package declares `requires-python <3.13` and will not install on a newer interpreter (its
+newer major version aborts outright on macOS; see [NEGATIVE_RESULTS.md](NEGATIVE_RESULTS.md)).
+After `--fetch-models` nothing leaves your machine. Add `--json` for the report described below.
 
 **From Claude Code**, the repository is its own plugin marketplace:
 

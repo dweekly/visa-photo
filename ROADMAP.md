@@ -48,7 +48,7 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
 - **Stage 5 — seeded profiles, the skill, a first release.** 5a merged 2026-09-07 (PR #8):
   `us_visa_digital` and `nz_nzeta` crop, write and check; `us_passport_print` and
   `cn_visa_paper` plan only; `schengen_print` refuses to crop with the reason and advises. 5b
-  in progress on branch `stage5b-release`: the plugin and skill, one version, `0.1.0`. Plan and
+  in progress on PR #9: the plugin and skill, one version, `0.1.0`. Plan and
   sources in [docs/STAGE5-PROFILES.md](docs/STAGE5-PROFILES.md).
 - **After 0.1.0, from the Stage 5 review.** Member-state overlays (France 32–36 mm, Germany
   70–80%, children 50–80% — all hair-exclusive or ambiguous about hair); US passport online
