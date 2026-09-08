@@ -15,5 +15,11 @@ installed=$("$tmp/venv/bin/python" -c "import importlib.metadata as m; print(m.v
 echo "installed metadata version: $installed (expected $version)"
 [ "$installed" = "$version" ] || { echo "VERSION MISMATCH"; exit 1; }
 "$tmp/venv/bin/visa-photo" --list-specs | head -3
+echo "--- metadata header:"
+unzip -p "$wheel" "visa_photo-$version.dist-info/METADATA" | awk '/^$/{exit} {print}' \
+  | grep -E "^(Name|Version|Author-email|License-Expression|License-File|Requires-Python|Classifier|Project-URL|Description-Content-Type):"
+if unzip -p "$wheel" "visa_photo-$version.dist-info/METADATA" | awk '/^$/{exit} {print}' | grep -q "^Classifier: License ::"; then
+  echo "licence classifier present - use the SPDX expression instead"; exit 1
+fi
 rm -rf "$tmp"
 echo "release check OK"

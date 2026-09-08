@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # PEP 639 licence metadata (License-Expression) needs 77+
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,12 +7,21 @@ name = "visa-photo"
 dynamic = ["version"]
 description = "Make a portrait satisfy a specific country's visa photo rules - and say honestly when it can't."
 readme = "README.md"
-license = { file = "LICENSE" }
-authors = [{ name = "David E. Weekly" }]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "David E. Weekly", email = "david@weekly.org" }]
+keywords = ["visa", "passport", "photo", "compliance", "crop", "icao"]
 requires-python = ">=3.10,<3.13"
+# Python versions the pinned face-landmark library publishes wheels for, and the operating
+# systems this has been run on. Windows is untested and not claimed.
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
   "Topic :: Multimedia :: Graphics",
 ]
 
@@ -40,6 +49,7 @@ visa-photo = "visaphoto.cli:main"
 Homepage = "https://github.com/dweekly/visa-photo"
 Repository = "https://github.com/dweekly/visa-photo"
 Changelog = "https://github.com/dweekly/visa-photo/blob/main/CHANGELOG.md"
+Issues = "https://github.com/dweekly/visa-photo/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
