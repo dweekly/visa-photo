@@ -14,6 +14,10 @@ not write a print; `schengen_print` refuses to crop, with the reason, and advise
 `uvx --python 3.12 visa-photo --fetch-models`, or as a Claude Code plugin from this repository.
 Progress by stage is in [ROADMAP.md](ROADMAP.md).
 
+Packaging metadata follows the Python packaging tutorial: an SPDX licence expression with the
+licence file (PEP 639), author email, Python-version and operating-system classifiers, keywords,
+and an issues URL.
+
 ### Added (Stage 5a)
 - Three destinations join China, each built from sentences on official pages fetched on
   2026-09-06 and kept verbatim under `docs/sources/`. `us_visa_digital` (square 600-1200 px,
