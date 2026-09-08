@@ -96,6 +96,12 @@ Full design in [docs/PLAN.md](docs/PLAN.md).
   search, alternate backends, transactional publication of a validated file. Today a written
   file stays on disk whatever its validation says; the report is the record.
 
+## Tech debt
+
+- **Lint and format as a pre-push hook** (`ruff`), and the same in CI beside the tests. The
+  suite runs in CI on 3.10-3.12 as of 2026-09-08; style is still unchecked.
+- **Duplicate-logic and coverage pass** over `cli.py`, which has grown a stage at a time.
+
 ## Adoption: distribution and the Claude skill
 
 Scheduled after Stage 5, but it constrains CLI design now, so it is recorded here.
