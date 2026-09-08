@@ -1,0 +1,75 @@
+name: Publish
+
+# A pushed tag v<version> builds, checks and publishes that exact commit to PyPI through
+# trusted publishing (OIDC): no token lives anywhere. The `pypi` environment requires a
+# reviewer's approval before the publish job runs. A manual run rehearses on TestPyPI.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build, test, check the wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: the tag must name __version__
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(python3 -c "import re,pathlib;print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/visaphoto/__init__.py').read_text()).group(1))")
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME does not name __version__ $version"; exit 1; }
+      - run: uv venv --python 3.12 .venv
+      - run: uv pip install --python .venv/bin/python -e '.[dev]'
+      - run: .venv/bin/python -m pytest -q
+      - name: build the wheel, install it outside the checkout, run it, check its metadata
+        run: tools/release_check.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: publish to PyPI
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/visa-photo/
+    permissions:
+      id-token: write   # trusted publishing: PyPI exchanges this workflow's OIDC identity for a short-lived token
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    name: rehearse on TestPyPI
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/visa-photo/
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true

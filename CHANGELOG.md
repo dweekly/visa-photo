@@ -4,7 +4,11 @@ User-facing changes, newest first. Cited from [README.md](README.md).
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+- Releases publish from GitHub Actions through PyPI trusted publishing (OIDC) when a `v<version>`
+  tag is pushed, after the tests and the wheel check pass and a reviewer approves the `pypi`
+  environment; no publishing token exists anywhere. A manual run rehearses on TestPyPI. The
+  test suite runs in CI on Python 3.10, 3.11 and 3.12.
 
 ## 0.1.0 - 2026-09-07
 

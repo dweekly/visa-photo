@@ -1,5 +1,7 @@
 # visa-photo
 
+[![CI](https://github.com/dweekly/visa-photo/actions/workflows/ci.yml/badge.svg)](https://github.com/dweekly/visa-photo/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/visa-photo)](https://pypi.org/project/visa-photo/)
+
 Turn an ordinary portrait into a photo that satisfies a specific country's visa or passport
 photo rules — and, just as importantly, tell you honestly when it can't.
 
