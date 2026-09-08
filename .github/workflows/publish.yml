@@ -17,8 +17,8 @@ jobs:
     name: build, test, check the wheel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
       - name: the tag must name __version__
         if: github.ref_type == 'tag'
         run: |
@@ -29,7 +29,7 @@ jobs:
       - run: .venv/bin/python -m pytest -q
       - name: build the wheel, install it outside the checkout, run it, check its metadata
         run: tools/release_check.sh
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: dist
           path: dist/
@@ -47,7 +47,7 @@ jobs:
       id-token: write   # trusted publishing: PyPI exchanges this workflow's OIDC identity for a short-lived token
       contents: read
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: dist
           path: dist/
@@ -65,7 +65,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: dist
           path: dist/

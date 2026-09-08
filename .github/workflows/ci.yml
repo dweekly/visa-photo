@@ -17,8 +17,8 @@ jobs:
       matrix:
         python: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
       # The model libraries are imported lazily and every test stubs the fits, so the suite
       # needs neither model weights nor a GPU stack: a plain runner is enough.
       - run: uv venv --python ${{ matrix.python }} .venv
