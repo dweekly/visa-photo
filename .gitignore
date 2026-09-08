@@ -25,3 +25,7 @@ dist/
 # tests/fixtures/ and must be redistributable; see docs/PLAN.md.
 *.HEIC
 *.heic
+
+# Secrets for publishing (PYPI_TOKEN). Never committed.
+.env
+.env.*
