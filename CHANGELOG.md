@@ -2,7 +2,9 @@
 
 User-facing changes, newest first. Cited from [README.md](README.md).
 
-## Unreleased
+## 0.2.0 - 2026-10-31
+
+Adds Vietnam's e-visa portrait (`vn_evisa`), the first profile whose source states no geometry.
 
 ### Added
 - `vn_evisa`: Vietnam's e-visa portrait, from the portal's own Instruction page and upload label

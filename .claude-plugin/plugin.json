@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "visa-photo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Crop, write and check a portrait against a specific country's visa or passport photo rules with the visa-photo CLI - and say honestly what could not be checked.",
   "author": {
     "name": "David E. Weekly",
