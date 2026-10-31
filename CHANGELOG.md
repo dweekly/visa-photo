@@ -4,6 +4,14 @@ User-facing changes, newest first. Cited from [README.md](README.md).
 
 ## Unreleased
 
+### Added
+- `vn_evisa`: Vietnam's e-visa portrait, from the portal's own Instruction page and upload label
+  (2026-10-31, verbatim in `docs/sources/vietnam-evisa-2026-10-31.md`). The portal states a 4x6 cm
+  frame, JPEG, under 2 MB and qualitative rules, and no geometry. A profile can now carry
+  `framing`, composition preferences of this tool for such a channel: they choose the crop's scale
+  and placement, the head's containment becomes hard, and no validation criterion checks them.
+  Vietnam's qualitative rules are attestations or not assessable.
+
 ### Changed
 - Releases publish from GitHub Actions through PyPI trusted publishing (OIDC) when a `v<version>`
   tag is pushed, after the tests and the wheel check pass and a reviewer approves the `pypi`

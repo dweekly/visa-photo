@@ -30,6 +30,7 @@ US_PASSPORT_PHOTOS = "https://travel.state.gov/en/passports/apply/help/photos.ht
 EU_GUIDANCE = "https://home-affairs.ec.europa.eu/document/download/5bb16566-c8c2-4afb-b038-530f488cb72a_en"
 NZ_PHOTOS = "https://www.immigration.govt.nz/process-to-apply/applying-for-a-visa/applying-online/uploading-documents-and-photos/visa-and-nzeta-photos/"
 NZ_PHOTOGRAPHER = "https://www.immigration.govt.nz/assets/inz/documents/apply-for-a-visa/Taking-acceptable-visa-photos.pdf"
+VN_INSTRUCTION = "https://evisa.gov.vn/instruction"
 US_VISA_FAQ = "https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/photos/frequently-asked-questions.html"
 
 
@@ -420,6 +421,57 @@ REQUIREMENTS: tuple[Requirement, ...] = (
               "shown.",
         source=EU_GUIDANCE,
         check=Check.USER_ATTESTATION,
+    ),
+    # --- Vietnam (evisa.gov.vn/instruction, fetched 2026-10-31). One sentence, split by clause.
+    Requirement(
+        key="recency_vn",
+        jurisdictions=("VN",),
+        quote="The visa applicant's photo must be a recent 4x6 cm image",
+        source=VN_INSTRUCTION,
+        check=Check.USER_ATTESTATION,
+        note="'Recent' is not defined on the page. Cannot be established from pixels.",
+    ),
+    Requirement(
+        key="pose_frontal_vn",
+        jurisdictions=("VN",),
+        quote="The photo should be a front-facing image with no hat, no glasses, in formal attire, and with a white background.",
+        source=VN_INSTRUCTION,
+        check=Check.NOT_ASSESSABLE,
+        note="'Front-facing' states no angle limit; the measured pose is reported, but no "
+             "threshold is Vietnam's to apply.",
+    ),
+    Requirement(
+        key="head_covering_vn",
+        jurisdictions=("VN",),
+        quote="The photo should be a front-facing image with no hat, no glasses, in formal attire, and with a white background.",
+        source=VN_INSTRUCTION,
+        check=Check.USER_ATTESTATION,
+        note="'no hat'. The page states no religious or medical exception.",
+    ),
+    Requirement(
+        key="glasses_vn",
+        jurisdictions=("VN",),
+        quote="The photo should be a front-facing image with no hat, no glasses, in formal attire, and with a white background.",
+        source=VN_INSTRUCTION,
+        check=Check.NOT_ASSESSABLE,
+        note="'no glasses', with no stated exception. Glasses frames are not detected in this build.",
+    ),
+    Requirement(
+        key="attire_vn",
+        jurisdictions=("VN",),
+        quote="The photo should be a front-facing image with no hat, no glasses, in formal attire, and with a white background.",
+        source=VN_INSTRUCTION,
+        check=Check.USER_ATTESTATION,
+        note="'in formal attire' is not defined on the page.",
+    ),
+    Requirement(
+        key="background_vn",
+        jurisdictions=("VN",),
+        quote="The photo should be a front-facing image with no hat, no glasses, in formal attire, and with a white background.",
+        source=VN_INSTRUCTION,
+        check=Check.NOT_ASSESSABLE,
+        note="'with a white background'. No background check in this build; the page does not "
+             "address editing, so background replacement stays unresolved.",
     ),
 )
 
