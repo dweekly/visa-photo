@@ -1,7 +1,7 @@
 ---
 name: visa-photo
 description: This skill should be used when the user asks to "make this photo visa compliant", "crop this for a visa photo", "make a passport photo", "check my visa photo", "is this photo OK for my visa", names a channel ("DS-160 photo", "NZeTA photo", "Chinese visa photo", "Schengen visa photo", "Vietnam e-visa photo", "2x2 passport photo"), or wants a portrait cropped, resized or checked against a country's visa or passport photo rules. Runs the visa-photo CLI and reports its verdicts; never crops by hand, never invents a specification.
-version: 0.1.0
+version: 0.2.0
 ---
 
 # visa-photo

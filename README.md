@@ -5,7 +5,7 @@
 Turn an ordinary portrait into a photo that satisfies a specific country's visa or passport
 photo rules — and, just as importantly, tell you honestly when it can't.
 
-**Status: 0.1.0.** Seven profiles from five destinations, each built from sentences on the
+**Status: 0.2.0.** Seven profiles from five destinations, each built from sentences on the
 official pages (kept verbatim under [docs/sources/](docs/sources/)). China's digital visa photo,
 the US visa photo (DS-160) and New Zealand's NZeTA photo are cropped, written and checked end to
 end, as is Vietnam's e-visa portrait (its portal states no geometry, so the tool frames it by a
