@@ -213,6 +213,13 @@ class Profile:
     composition_unresolved: str = ""
     """When the reviewed sources state no computable composition rule, the reason. The plan
     skips every size with it: no crop is solved from rules nobody wrote."""
+    framing: tuple[Rule, ...] = ()
+    """Composition preferences of this tool, for a channel whose sources state no geometry at
+    all (Vietnam: a 4x6 cm frame and nothing about the head). Distinct from
+    `composition_unresolved`: there a rule binds but cannot be computed; here the sources are
+    silent, so every framing satisfies them and a preference can violate nothing. Each entry
+    names its source; each becomes a solver preference (never a bound, never a validation
+    criterion), and the head's containment in the frame becomes hard."""
     notes: tuple[str, ...] = ()
 
     def provenance(self, rule: Rule) -> tuple[str, str]:
@@ -236,6 +243,7 @@ class Profile:
             "encoding": self.encoding.to_dict() if self.encoding else None,
             "dimensions": self.dimensions.to_dict() if self.dimensions else None,
             "composition_unresolved": self.composition_unresolved or None,
+            "framing": [r.to_dict() for r in self.framing],
             "notes": list(self.notes),
         }
 
@@ -628,6 +636,93 @@ NZ_NZETA = Profile(
     ),
 )
 
+# --- Vietnam, e-visa (digital) ------------------------------------------------------------------
+# Source fetched 2026-10-31 from the portal's own Instruction page, verbatim in
+# docs/sources/vietnam-evisa-2026-10-31.md. The one sentence on the portrait states a frame,
+# a format, a byte cap and qualitative rules; it says nothing about head size, eye line or
+# placement. There are no geometric rules here, and the framing below is this tool's.
+
+VN_INSTRUCTION = "https://evisa.gov.vn/instruction"
+VN_PHOTO_SENTENCE = (
+    "The visa applicant's photo must be a recent 4x6 cm image in JPG or JPEG format, with a file "
+    "size of less than 2MB. The photo should be a front-facing image with no hat, no glasses, in "
+    "formal attire, and with a white background."
+)
+ICAO_TR_PQ = "ICAO Technical Report, Portrait Quality (Reference Facial Images for MRTD), v1.0, Table 9"
+
+VN_EVISA = Profile(
+    key="vn_evisa",
+    jurisdiction="VN",
+    destination="Vietnam",
+    channel="e-visa application (evisa.gov.vn), digital portrait",
+    source=VN_INSTRUCTION,
+    retrieved="2026-10-31",
+    sizes=(OutputSize(600, 900),),
+    sizes_quote="a recent 4x6 cm image",
+    dimensions=DimensionRange(
+        min=OutputSize(2, 3), max=OutputSize(100_000, 150_000), aspect=(2, 3),
+        quote="a recent 4x6 cm image", source=VN_INSTRUCTION,
+    ),
+    rules=(),
+    framing=(
+        Rule(
+            key="head_height",
+            quote="60% <= L/B <= 90%",
+            measurement="head_height",
+            lo=0.60, hi=0.70, unit="fraction_height",
+            interpretation="This tool's preference, not Vietnam's rule: the lower part of ICAO's "
+                           "60-90% band of head length over image height, so the shoulders stay "
+                           "in frame as a 4x6 cm print shows them (the band's midpoint, 75%, "
+                           "cropped the shoulders off on 2026-10-31's four portraits). Applied to "
+                           "the hair-inclusive head (matte top to chin) because the anatomical "
+                           "crown is not measured.",
+            source=ICAO_TR_PQ,
+        ),
+        Rule(
+            key="eye_line_from_top",
+            quote="30% <= Mv/B <= 50%",
+            measurement="eye_line_y",
+            lo=0.30, hi=0.50, unit="fraction_height",
+            interpretation="This tool's preference, not Vietnam's rule: ICAO's eye-line height "
+                           "from the top over image height.",
+            source=ICAO_TR_PQ,
+        ),
+    ),
+    operations={
+        "crop": "allowed", "resize": "allowed", "encode": "allowed", "colour_convert": "allowed",
+        "rotate": "unresolved", "replace_background": "unresolved",
+        "adjust_colour": "unresolved", "synthesize_pixels": "unresolved",
+    },
+    operations_quotes={
+        "crop": VN_PHOTO_SENTENCE,
+        "resize": "a recent 4x6 cm image",
+        "encode": "in JPG or JPEG format, with a file size of less than 2MB",
+    },
+    encoding=Encoding(
+        format="jpeg", colour="srgb_24bit", colour_required=None,
+        quote="in JPG or JPEG format, with a file size of less than 2MB",
+        interpretation="'less than 2MB' is strict and does not say which megabyte; both readings "
+                       "are kept and the encoder targets the smaller. The page states no pixel "
+                       "dimensions, only '4x6 cm', read as a 2:3 portrait frame; 600x900 is this "
+                       "tool's choice (about 380 dpi at 4x6 cm). No colour requirement is "
+                       "stated; sRGB is this tool's choice.",
+        size_readings=(
+            SizeReading("MB = 1,000,000 bytes, strict", None, 1_999_999),
+            SizeReading("MB = 1,048,576 bytes, strict", None, 2_097_151),
+        ),
+        source=VN_INSTRUCTION,
+    ),
+    notes=(
+        "The source states no geometry: no head size, eye line or placement. The crop is framed by "
+        "this tool's preferences (ICAO Portrait Quality Table 9), which no validation criterion "
+        "checks; only the frame and the file are Vietnam's.",
+        "The portal checks the portrait itself on upload ('The system automatically verifies the "
+        "portrait and passport images'); its criteria are not published.",
+        "Third-party guides give other byte caps (1 MB, 2048 KB) and pixel sizes (472x709); the "
+        "portal's own page says 'less than 2MB' and gives no pixels.",
+    ),
+)
+
 # --- Schengen ----------------------------------------------------------------------------------
 # Sources fetched 2026-09-06, verbatim in docs/sources/schengen-icao-2026-09-06.md. No EU-level
 # source states a computable composition rule, and the ICAO rule the sources reach governs the
@@ -677,7 +772,7 @@ SCHENGEN_PRINT = Profile(
 
 PROFILES: dict[str, Profile] = {
     p.key: p for p in (CN_VISA_DIGITAL, CN_VISA_PAPER, US_VISA_DIGITAL, US_PASSPORT_PRINT,
-                       NZ_NZETA, SCHENGEN_PRINT)
+                       NZ_NZETA, VN_EVISA, SCHENGEN_PRINT)
 }
 
 
@@ -801,6 +896,28 @@ def build_constraints(
     if profile.rules and "eye_line_from_bottom" not in rule_keys and eye_line is not None:
         constraints.append(Constraint("eye_vertical", a=eye_line, b=-1.0,
                                       lo=0.30 * size.height, hi=0.50 * size.height, preference=True))
+
+    # Framing preferences, for a channel whose sources state no geometry (Profile.framing).
+    # The head's containment is hard: a portrait that cuts off the head is not a portrait, and
+    # without it the scale would be unbounded. Everything else is preference.
+    for pref in profile.framing:
+        if pref.key == "head_height":
+            if crown is None or chin is None:
+                unapplied.append(f"framing {pref.key}: matte_top_row or chin_landmark_y is unavailable")
+                continue
+            constraints.append(Constraint("framing_head_height", a=chin - crown,
+                                          lo=to_px(pref, pref.lo), hi=to_px(pref, pref.hi), preference=True))
+            constraints.append(Constraint("head_inside_top", a=crown, b=-1.0, lo=0.0, hard=True))
+            constraints.append(Constraint("head_inside_bottom", a=-chin, b=1.0, k=float(size.height),
+                                          lo=0.0, hard=True))
+        elif pref.key == "eye_line_from_top":
+            if eye_line is None:
+                unapplied.append(f"framing {pref.key}: eye_line_y is unavailable")
+                continue
+            constraints.append(Constraint("framing_eye_line", a=eye_line, b=-1.0,
+                                          lo=to_px(pref, pref.lo), hi=to_px(pref, pref.hi), preference=True))
+        else:  # pragma: no cover - guards against a preference added without a handler
+            unapplied.append(f"framing {pref.key}: no handler in this build")
 
     # Horizontal placement. No source surveyed states a numeric band, so this is a tool
     # PREFERENCE rather than anyone's law: keep the eye midpoint within the middle tenth

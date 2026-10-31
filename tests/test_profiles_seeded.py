@@ -399,3 +399,37 @@ class TestCliProfiles:
         assert "permitted: 1:1, 600x600 to 1200x1200" in text
         assert "permitted: 3:4, 900x1200 to 2250x3000" in text
         assert text.count("print profile: plans only") == 3
+
+
+# --- Vietnam: a channel whose sources state no geometry ------------------------------------------
+class TestVietnam:
+    def test_no_published_geometry_and_framing_is_labelled(self):
+        from visaphoto.profiles import VN_EVISA
+        assert VN_EVISA.rules == ()
+        assert VN_EVISA.composition_unresolved == ""
+        assert {r.key for r in VN_EVISA.framing} == {"head_height", "eye_line_from_top"}
+        for pref in VN_EVISA.framing:
+            assert "preference, not Vietnam's rule" in pref.interpretation
+            assert pref.source.startswith("ICAO")
+
+    def test_byte_cap_is_strict_under_both_readings(self):
+        from visaphoto.profiles import VN_EVISA
+        assert VN_EVISA.encoding.max_bytes == 1_999_999
+        assert VN_EVISA.encoding.min_bytes is None
+        assert VN_EVISA.dimensions.permits(600, 900)[0]
+        assert not VN_EVISA.dimensions.permits(600, 800)[0]
+
+    def test_framing_places_the_crop_but_never_bounds_it(self):
+        """Preferences alone choose scale and placement; the head's containment is the only
+        hard addition, and the plan's min_slack is over published rules only (none here)."""
+        from visaphoto.profiles import VN_EVISA, build_constraints
+        m = reference_measurements()
+        cons, unapplied = build_constraints(VN_EVISA, VN_EVISA.sizes[0], m)
+        assert unapplied == []
+        names = {c.rule: c for c in cons}
+        assert names["framing_head_height"].preference and names["framing_eye_line"].preference
+        assert names["head_inside_top"].hard and names["head_inside_bottom"].hard
+        assert not any(c.preference is False and c.hard is False for c in cons)
+        plan = make_plan(VN_EVISA, m)
+        assert plan.chosen is not None
+        assert plan.chosen.outcome.min_slack == 0.0
