@@ -3,6 +3,10 @@
 Fresh as of 2026-09-08. A release tag lands on a commit whose docs already state the release,
 and pushing the tag is the release: no token exists anywhere.
 
+## Status (2026-11-01)
+
+0.2.0 is merged on `main` (c4fefd8) but **not published**. The first ever run of `publish.yml` (run 41232034719, the TestPyPI rehearsal) failed with `invalid-publisher`: no trusted publisher exists yet on test.pypi.org or pypi.org (0.1.0 was uploaded by hand). Blocked on David adding both, each with owner `dweekly`, repository `visa-photo`, workflow `publish.yml`, environment `testpypi` and `pypi` respectively. Then resume at checklist step 5.
+
 ## One version
 
 `visaphoto/__init__.py` holds `__version__`; `pyproject.toml` reads it (`dynamic = ["version"]`);
